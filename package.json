@@ -1,0 +1,19 @@
+{
+  "name": "nod",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,api -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "npm --workspace web run dev",
+    "dev:api": "npm --workspace api run dev",
+    "build": "npm --workspace web run build && npm --workspace api run build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "concurrently": "^9.1.0"
+  }
+}

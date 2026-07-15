@@ -1,0 +1,436 @@
+// NOD — Prisma schema. All money in integer cents.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  PROVIDER
+  ADMIN
+}
+
+enum ProviderStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+  REJECTED
+}
+
+enum JobStatus {
+  AVAILABLE
+  CLAIMED
+  PENDING_APPROVAL
+  APPROVED
+  DECLINED
+  EN_ROUTE
+  ARRIVED
+  IN_PROGRESS
+  COMPLETE
+  CANCELLED
+}
+
+enum AdjustmentStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+enum PaymentType {
+  BASE
+  ADDON
+  CANCELLATION_FEE
+  PROVIDER_STRIKE
+  PROVIDER_DEPOSIT
+  PAYOUT
+  REFUND
+}
+
+enum PaymentStatus {
+  REQUIRES_PAYMENT
+  AUTHORIZED
+  CAPTURED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  FAILED
+  CANCELLED
+}
+
+enum CancellationTier {
+  BEFORE_CLAIM
+  AFTER_CLAIM
+  AFTER_EN_ROUTE
+  NO_SHOW
+}
+
+enum CancelledBy {
+  CUSTOMER
+  PROVIDER
+  ADMIN
+  SYSTEM
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum NotificationChannel {
+  SMS
+  PUSH
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+enum StrikeReason {
+  NO_SHOW
+  LATE_CANCEL
+  LATE_ARRIVAL
+  LOW_RATING
+  OTHER
+}
+
+// (Strike model gains `settledAt` to mark fees already deducted from a payout.)
+
+model User {
+  id            String   @id @default(cuid())
+  email         String?  @unique
+  phone         String?  @unique
+  phoneVerified Boolean  @default(false)
+  passwordHash  String?
+  role          Role     @default(CUSTOMER)
+  fullName      String?
+  isGuest       Boolean  @default(false)
+  suspendedUntil DateTime?
+  suspendedReason String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  provider      Provider?
+  customerJobs  Job[]          @relation("CustomerJobs")
+  sessions      Session[]
+  ratingsGiven  Rating[]       @relation("RatingsGiven")
+  ratingsGot    Rating[]       @relation("RatingsReceived")
+  notifications Notification[]
+  disputes      Dispute[]      @relation("DisputeRaisedBy")
+  payments      Payment[]
+  messages      Message[]      @relation("MessageSender")
+
+  @@index([role])
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String
+  userAgent        String?
+  ip               String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId])
+  @@index([refreshTokenHash])
+}
+
+model Provider {
+  id                    String         @id @default(cuid())
+  userId                String         @unique
+  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status                ProviderStatus @default(PENDING_APPROVAL)
+  vehicleType           String?
+  licenseUrl            String?
+  profilePhotoUrl       String?
+  bio                   String?
+  stripeAccountId       String?
+  depositSetupId        String?
+  depositPaymentIntentId String?
+  depositRefundedAt     DateTime?
+  depositStatus         PaymentStatus?
+  backgroundCheckStatus String?        @default("STUB_PENDING")
+  approvedAt            DateTime?
+  approvedById          String?
+  ratingAvg             Float          @default(0)
+  ratingCount           Int            @default(0)
+  suspendedUntil        DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  categoryRates ProviderCategoryRate[]
+  claimedJobs   Job[]                  @relation("ProviderJobs")
+  strikes       Strike[]
+  adjustments   Adjustment[]
+
+  @@index([status])
+}
+
+model Category {
+  id                    String   @id @default(cuid())
+  slug                  String   @unique
+  name                  String
+  active                Boolean  @default(true)
+  sortOrder             Int      @default(0)
+  promptTemplate        String
+  intakeConfig          Json
+  baseFeeCents          Int      @default(0)
+  disposalFeeCents      Int      @default(0)
+  perMileFeeCents       Int      @default(0)
+  fallbackHourlyRateCents Int    @default(5000)
+  minHours              Float    @default(0.5)
+  maxHours              Float    @default(12)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  providerRates ProviderCategoryRate[]
+  jobs          Job[]
+  estimates     Estimate[]
+
+  @@index([active])
+}
+
+model Estimate {
+  id             String   @id @default(cuid())
+  categoryId     String
+  category       Category @relation(fields: [categoryId], references: [id])
+  customerId     String?
+  photoUrl       String?
+  description    String
+  intakeData     Json?
+  serviceAddress String?
+  distanceMiles  Float?
+  estimatedHours Float
+  avgRateCents   Int
+  rateSource     String
+  estimateSource String
+  basePriceCents Int
+  breakdown      Json
+  suggestedAddOns Json?
+  lockedUntil    DateTime
+  inputsHash     String
+  consumed       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([categoryId])
+}
+
+model ProviderCategoryRate {
+  id              String   @id @default(cuid())
+  providerId      String
+  provider        Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  categoryId      String
+  category        Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  hourlyRateCents Int
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@unique([providerId, categoryId])
+  @@index([categoryId, active])
+}
+
+model Job {
+  id               String            @id @default(cuid())
+  customerId       String
+  customer         User              @relation("CustomerJobs", fields: [customerId], references: [id])
+  categoryId       String
+  category         Category          @relation(fields: [categoryId], references: [id])
+  providerId       String?
+  provider         Provider?         @relation("ProviderJobs", fields: [providerId], references: [id])
+  status           JobStatus         @default(AVAILABLE)
+
+  photoUrl         String?
+  description      String
+  intakeData       Json?
+  serviceAddress   String?
+  distanceMiles    Float?
+
+  estimateId       String?
+  estimatedHours   Float?
+  basePriceCents   Int
+  lockedPriceCents Int?
+  lockedUntil      DateTime?
+
+  providerLat      Float?
+  providerLng      Float?
+  etaMinutes       Int?
+
+  claimedAt        DateTime?
+  enRouteAt        DateTime?
+  arrivedAt        DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+  cancelledBy      CancelledBy?
+  cancellationTier CancellationTier?
+  delayNoticeAt    DateTime?
+  latePenaltyCents Int               @default(0)
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  adjustments   Adjustment[]
+  payments      Payment[]
+  ratings       Rating[]
+  disputes      Dispute[]
+  notifications Notification[]
+  messages      Message[]
+  photos        JobPhoto[]
+
+  @@index([status])
+  @@index([categoryId, status])
+  @@index([providerId, status])
+  @@index([lockedUntil])
+}
+
+model Adjustment {
+  id          String           @id @default(cuid())
+  jobId       String
+  job         Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  providerId  String
+  provider    Provider         @relation(fields: [providerId], references: [id])
+  description String
+  priceCents  Int
+  status      AdjustmentStatus @default(PENDING)
+  approvedAt  DateTime?
+  declinedAt  DateTime?
+  createdAt   DateTime         @default(now())
+
+  @@index([jobId, status])
+}
+
+model Payment {
+  id                    String        @id @default(cuid())
+  jobId                 String?
+  job                   Job?          @relation(fields: [jobId], references: [id])
+  userId                String
+  user                  User          @relation(fields: [userId], references: [id])
+  type                  PaymentType
+  status                PaymentStatus @default(REQUIRES_PAYMENT)
+  amountCents           Int
+  platformFeeCents      Int           @default(0)
+  providerNetCents      Int           @default(0)
+  stripePaymentIntentId String?
+  stripeChargeId        String?
+  stripeRefundId        String?
+  stripeTransferId      String?
+  capturedAt            DateTime?
+  refundedAmountCents   Int           @default(0)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([jobId])
+  @@index([userId])
+  @@index([type, status])
+}
+
+model Rating {
+  id        String   @id @default(cuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  raterId   String
+  rater     User     @relation("RatingsGiven", fields: [raterId], references: [id])
+  rateeId   String
+  ratee     User     @relation("RatingsReceived", fields: [rateeId], references: [id])
+  stars     Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@unique([jobId, raterId])
+  @@index([rateeId])
+}
+
+model Strike {
+  id         String       @id @default(cuid())
+  providerId String
+  provider   Provider     @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  jobId      String?
+  reason     StrikeReason
+  feeCents   Int          @default(0)
+  note       String?
+  settledAt  DateTime?
+  createdAt  DateTime     @default(now())
+
+  @@index([providerId, createdAt])
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String?
+  job       Job?                @relation(fields: [jobId], references: [id])
+  channel   NotificationChannel @default(IN_APP)
+  status    NotificationStatus  @default(QUEUED)
+  template  String
+  title     String
+  body      String
+  payload   Json?
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  @@index([userId, readAt])
+  @@index([jobId])
+}
+
+model Dispute {
+  id           String        @id @default(cuid())
+  jobId        String
+  job          Job           @relation(fields: [jobId], references: [id])
+  raisedById   String
+  raisedBy     User          @relation("DisputeRaisedBy", fields: [raisedById], references: [id])
+  status       DisputeStatus @default(OPEN)
+  reason       String
+  description  String?
+  resolution   String?
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([status])
+  @@index([jobId])
+}
+
+enum JobPhotoKind {
+  BEFORE
+  AFTER
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id])
+  senderId  String
+  sender    User     @relation("MessageSender", fields: [senderId], references: [id])
+  body      String
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([jobId, createdAt])
+}
+
+model JobPhoto {
+  id        String       @id @default(cuid())
+  jobId     String
+  job       Job          @relation(fields: [jobId], references: [id])
+  kind      JobPhotoKind
+  url       String
+  lat       Float?
+  lng       Float?
+  takenAt   DateTime     @default(now())
+
+  @@index([jobId])
+}

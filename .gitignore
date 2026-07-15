@@ -1,0 +1,26 @@
+# deps + build
+node_modules/
+dist/
+apps/web/dist/
+apps/api/dist/
+.vite/
+
+# secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# runtime / test artifacts
+apps/api/uploads/
+test-results/
+playwright-report/
+*.log
+
+# misc
+.DS_Store
+*.local
+
+# original Lovable reference (kept out of the app repo)
+loveable-old code/
