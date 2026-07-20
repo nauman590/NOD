@@ -109,6 +109,7 @@ export class JobsService implements OnModuleInit {
       startedAt: job.startedAt,
       completedAt: job.completedAt,
       cancelledAt: job.cancelledAt,
+      cancellationReason: job.cancellationReason ?? null,
     };
   }
 
@@ -618,7 +619,7 @@ export class JobsService implements OnModuleInit {
     return this.serialize(updated);
   }
 
-  async cancel(jobId: string, user: AuthUser) {
+  async cancel(jobId: string, user: AuthUser, reason?: string) {
     const job = await this.prisma.job.findUnique({ where: { id: jobId }, include: this.jobInclude });
     if (!job) throw new NotFoundException("job not found");
     const isCustomer = job.customerId === user.id;
@@ -626,19 +627,34 @@ export class JobsService implements OnModuleInit {
     if (!isCustomer && !isProvider && user.role !== Role.ADMIN) throw new ForbiddenException("not your job");
 
     // A terminal job can't be cancelled. Without this guard, cancelling an already
-    // COMPLETE/CANCELLED/DECLINED job would charge a bogus cancellation fee and flip the
-    // status to CANCELLED, and repeated calls would re-charge every time.
-    const terminal: JobStatus[] = [JobStatus.COMPLETE, JobStatus.CANCELLED, JobStatus.DECLINED];
+    // COMPLETE/CANCELLED job would charge a bogus cancellation fee and flip the status to
+    // CANCELLED, and repeated calls would re-charge every time. DECLINED is NOT terminal —
+    // it's a completable add-on-detour state (see COMPLETABLE), so the customer can still
+    // cancel a job whose add-ons they declined.
+    const terminal: JobStatus[] = [JobStatus.COMPLETE, JobStatus.CANCELLED];
     if (terminal.includes(job.status)) {
       throw new ConflictException(`Cannot cancel a job that is already ${job.status.toLowerCase()}`);
     }
 
-    // Determine cancellation tier from current lifecycle state.
-    let tier: CancellationTier;
-    if (job.status === JobStatus.AVAILABLE) tier = CancellationTier.BEFORE_CLAIM;
-    else if (job.status === JobStatus.EN_ROUTE || job.status === JobStatus.ARRIVED || job.status === JobStatus.IN_PROGRESS)
-      tier = CancellationTier.AFTER_EN_ROUTE;
-    else tier = CancellationTier.AFTER_CLAIM;
+    // Who initiates the cancel decides the money flow. Cancellation fees are a CUSTOMER
+    // policy: a customer- (or admin-) initiated cancel charges the customer per tier and
+    // pays it to the provider. A PROVIDER cancelling their own claimed job is abandonment —
+    // the customer must be FULLY RELEASED (no fee, tier=null; only the base hold is
+    // released) and the provider penalised instead. This mirrors markProviderNoShow's
+    // tier:null full release; never bill a customer for the provider's own cancellation.
+    const isProviderCancel = isProvider && !isCustomer;
+
+    // Determine the tier from lifecycle TIMESTAMPS, not the status label (customer/admin
+    // cancels only). Timestamps are monotonic and immune to add-on sub-states: a job sitting
+    // in PENDING_APPROVAL/APPROVED (mid-job add-on negotiation) has already gone en-route, so
+    // keying off enRouteAt correctly charges 25% there instead of letting it fall through to
+    // the $10 AFTER_CLAIM tier. arrivedAt implies enRouteAt, so enRouteAt covers en-route
+    // through in-progress.
+    let tier: CancellationTier | null;
+    if (isProviderCancel) tier = null;
+    else if (job.enRouteAt || job.arrivedAt) tier = CancellationTier.AFTER_EN_ROUTE;
+    else if (job.claimedAt) tier = CancellationTier.AFTER_CLAIM;
+    else tier = CancellationTier.BEFORE_CLAIM;
 
     const updated = await this.prisma.job.update({
       where: { id: jobId },
@@ -647,15 +663,27 @@ export class JobsService implements OnModuleInit {
         cancelledAt: new Date(),
         cancelledBy: isCustomer ? CancelledBy.CUSTOMER : isProvider ? CancelledBy.PROVIDER : CancelledBy.ADMIN,
         cancellationTier: tier,
+        cancellationReason: reason?.trim() || null,
       },
       include: this.jobInclude,
     });
-    // Charge the cancellation fee / release the base hold per tier.
+    // Release the base hold. For a customer/admin cancel this also charges the tier fee and
+    // pays the provider; for a provider cancel (tier=null) it only releases the hold — the
+    // customer is never charged.
     const { feeCents } = await this.payments.handleCancellation(jobId);
 
     // A provider abandoning a claimed job earns a strike ($20 deducted next payout).
-    if (isProvider && job.providerId && tier !== CancellationTier.BEFORE_CLAIM) {
+    if (isProviderCancel && job.providerId) {
       await this.strikes.issue(job.providerId, "LATE_CANCEL", { feeCents: 2000, jobId, note: "Provider cancelled a claimed job" });
+
+      // Let the customer know their pro backed out and that they weren't charged.
+      await this.notifications.notify({
+        userId: job.customerId,
+        jobId,
+        template: "JOB_CANCELLED_BY_PROVIDER",
+        title: "Your pro cancelled",
+        body: "Your assigned pro cancelled this job. You weren't charged — feel free to re-book.",
+      });
     }
 
     if (job.providerId) this.rt.emit(this.rt.providerRoom(job.providerId), "job.updated", this.serialize(updated));

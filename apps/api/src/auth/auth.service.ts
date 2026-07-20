@@ -178,12 +178,19 @@ export class AuthService {
     const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
     const phoneOtpHash = crypto.createHash("sha256").update(code).digest("hex");
     const phoneOtpExpiresAt = new Date(Date.now() + AuthService.OTP_TTL_MINUTES * 60 * 1000);
-    await this.prisma.user.update({ where: { id: userId }, data: { phoneOtpHash, phoneOtpExpiresAt } });
+    await this.prisma.user.update({ where: { id: userId }, data: { phoneOtpHash, phoneOtpExpiresAt, phoneOtpAttempts: 0 } });
 
     const send = await this.notifications.sendDirectSms(user.phone, `Your NOD verification code is ${code}. It expires in ${AuthService.OTP_TTL_MINUTES} minutes.`);
     const exposeCode = !send.sent && this.exposeResetUrl(); // stubbed + non-prod → surface for testing
     return { ok: true, sent: send.sent, ...(exposeCode ? { devCode: code } : {}) };
   }
+
+  // Per-user wrong-guess counter, persisted on the User row (phoneOtpAttempts) so the cap
+  // holds across API instances — a static in-memory Map would reset per process and let a
+  // multi-instance deployment be brute-forced. Combined with the per-IP throttle on the verify
+  // endpoint, this caps brute-forcing the 6-digit code: after MAX wrong guesses the active
+  // code is invalidated and a fresh one must be requested. Reset to 0 whenever a code is issued.
+  private static OTP_MAX_ATTEMPTS = 5;
 
   async verifyPhoneOtp(userId: string, code: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -192,10 +199,19 @@ export class AuthService {
       throw new BadRequestException("No active code. Request a new one.");
     }
     const hash = crypto.createHash("sha256").update(code).digest("hex");
-    if (hash !== user.phoneOtpHash) throw new BadRequestException("Incorrect code.");
+    if (hash !== user.phoneOtpHash) {
+      const attempts = user.phoneOtpAttempts + 1;
+      if (attempts >= AuthService.OTP_MAX_ATTEMPTS) {
+        // Too many wrong guesses — burn the code so it can't be brute-forced further.
+        await this.prisma.user.update({ where: { id: userId }, data: { phoneOtpHash: null, phoneOtpExpiresAt: null, phoneOtpAttempts: 0 } });
+        throw new BadRequestException("Too many incorrect attempts. Request a new code.");
+      }
+      await this.prisma.user.update({ where: { id: userId }, data: { phoneOtpAttempts: attempts } });
+      throw new BadRequestException("Incorrect code.");
+    }
     await this.prisma.user.update({
       where: { id: userId },
-      data: { phoneVerified: true, phoneOtpHash: null, phoneOtpExpiresAt: null },
+      data: { phoneVerified: true, phoneOtpHash: null, phoneOtpExpiresAt: null, phoneOtpAttempts: 0 },
     });
     return { ok: true, phoneVerified: true };
   }

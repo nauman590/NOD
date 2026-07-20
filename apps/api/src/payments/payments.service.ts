@@ -247,24 +247,38 @@ export class PaymentsService {
   }
 
   // Cancellation tiers: BEFORE_CLAIM=$0; AFTER_CLAIM=$10 flat; AFTER_EN_ROUTE=25%; NO_SHOW=50%.
+  // The fee is a percentage of the BASE service price ONLY — add-ons the customer already
+  // paid are refunded here (see refundCapturedAddOns), never re-billed as part of the fee.
   // Customer pays the fee; provider keeps 100% of it. The base hold is released.
-  async handleCancellation(jobId: string): Promise<{ feeCents: number }> {
+  async handleCancellation(jobId: string): Promise<{ feeCents: number; refundedAddOnCents: number }> {
     const job = await this.prisma.job.findUnique({
       where: { id: jobId },
-      include: { adjustments: { where: { status: "APPROVED" } }, provider: true },
+      include: { provider: true },
     });
-    if (!job) return { feeCents: 0 };
+    if (!job) return { feeCents: 0, refundedAddOnCents: 0 };
 
     await this.releaseBase(jobId);
 
-    const approvedAddOns = job.adjustments.reduce((s, a) => s + a.priceCents, 0);
-    const total = job.basePriceCents + approvedAddOns;
+    // The cancelled job won't be delivered, so refund every add-on the customer already paid
+    // (captured at approval). Otherwise that money strands in the platform balance — the
+    // provider is only ever paid add-ons at completion, which now never happens. Runs for
+    // EVERY cancellation (customer, provider, or no-show) and before any fee/early-return.
+    const refundedAddOnCents = await this.refundCapturedAddOns(jobId);
 
+    // Fee is a percentage of the base service price only (add-ons were just refunded, so
+    // charging a slice of them would double-bill).
     let feeCents = 0;
     if (job.cancellationTier === "AFTER_CLAIM") feeCents = 1000;
-    else if (job.cancellationTier === "AFTER_EN_ROUTE") feeCents = Math.round(total * 0.25);
-    else if (job.cancellationTier === "NO_SHOW") feeCents = Math.round(total * 0.5);
-    if (feeCents <= 0) return { feeCents: 0 };
+    else if (job.cancellationTier === "AFTER_EN_ROUTE") feeCents = Math.round(job.basePriceCents * 0.25);
+    else if (job.cancellationTier === "NO_SHOW") feeCents = Math.round(job.basePriceCents * 0.5);
+
+    // If the provider arrived late, the customer earned a 10% credit that's normally applied at
+    // completion. A cancel never completes, so honour that credit here by netting it off the
+    // cancellation fee (floored at 0) — otherwise the provider's late penalty is charged with no
+    // matching customer credit (the desync between arrived() and complete()).
+    if (feeCents > 0 && job.latePenaltyCents > 0) feeCents = Math.max(0, feeCents - job.latePenaltyCents);
+
+    if (feeCents <= 0) return { feeCents: 0, refundedAddOnCents };
 
     // Charge the customer's saved card. The job is already committed CANCELLED, so a
     // charge failure must NOT throw (that would 500 and lose the fee) — record a FAILED
@@ -287,7 +301,7 @@ export class PaymentsService {
             providerNetCents: feeCents,
           },
         });
-        return { feeCents: 0 };
+        return { feeCents: 0, refundedAddOnCents };
       }
     }
 
@@ -319,7 +333,28 @@ export class PaymentsService {
         capturedAt: new Date(),
       },
     });
-    return { feeCents };
+    return { feeCents, refundedAddOnCents };
+  }
+
+  // Refund every add-on the customer already paid on a job that's being cancelled (the extra
+  // work won't happen). Returns the total refunded. Idempotent: only CAPTURED add-on rows are
+  // refunded, so a re-run skips ones already REFUNDED. Never throws — the job is already
+  // committed CANCELLED, so a Stripe hiccup is logged for reconciliation, not surfaced as a 500.
+  private async refundCapturedAddOns(jobId: string): Promise<number> {
+    const addOns = await this.prisma.payment.findMany({
+      where: { jobId, type: PaymentType.ADDON, status: PaymentStatus.CAPTURED },
+    });
+    let refundedCents = 0;
+    for (const addOn of addOns) {
+      try {
+        await this.refundPayment(addOn.id);
+        refundedCents += addOn.amountCents;
+      } catch (e) {
+        this.logger.warn(`Add-on refund failed for payment ${addOn.id} on job ${jobId}: ${(e as Error).message}`);
+      }
+    }
+    if (refundedCents > 0) this.logger.log(`Refunded ${refundedCents}c of add-ons on cancelled job ${jobId}`);
+    return refundedCents;
   }
 
   // ---- Dispute resolution money movement (Sprint 5) ----

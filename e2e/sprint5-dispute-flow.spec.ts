@@ -27,7 +27,7 @@ test.describe.configure({ timeout: 120_000 });
 async function activeProvider() {
   const email = `s5_pro_${uniq()}@nod.app`;
   const reg = await (
-    await ctx.post(`${API}/auth/register/provider`, { data: { email, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "S5 Pro" } })
+    await ctx.post(`${API}/auth/register/provider`, { data: { email, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "S5 Pro", licenseUrl: "http://x/license.jpg", profilePhotoUrl: "http://x/pro.jpg" } })
   ).json();
   await ctx.post(`${API}/admin/providers/${reg.provider.id}/background`, { headers: bearer(adminTok), data: { result: "PASSED" } });
   await ctx.post(`${API}/admin/providers/${reg.provider.id}/approve`, { headers: bearer(adminTok) });

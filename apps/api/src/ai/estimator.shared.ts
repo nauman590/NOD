@@ -143,15 +143,23 @@ export async function resolveImageData(
   }
 }
 
+// A single junk-removal truckload is ~15–18 cu yd; cap well above that so a hallucinated
+// or malformed model value can't drive an unbounded volume charge into the price.
+export const MAX_VOLUME_CUBIC_YARDS = 40;
+
 export function clampResult(r: EstimateAiResult, minHours: number, maxHours: number): EstimateAiResult {
   let hours = Number(r.estimatedHours);
   if (!isFinite(hours) || hours <= 0) hours = minHours;
   hours = Math.min(Math.max(hours, minHours), maxHours);
   const confidence = Math.min(Math.max(Number(r.confidence) || 0.5, 0), 1);
+  // volumeCubicYards feeds a real per-yard charge — clamp it to a sane non-negative range
+  // so a bad model output can't inflate (or, if negative, corrupt) the price.
+  const rawVolume = Number(r.volumeCubicYards);
+  const volumeCubicYards = !isFinite(rawVolume) || rawVolume <= 0 ? 0 : Math.min(rawVolume, MAX_VOLUME_CUBIC_YARDS);
   const addOns = (r.suggestedAddOns || [])
     .filter((a) => a && a.description && a.amount > 0 && a.amount < 2000)
     .slice(0, 6);
-  return { ...r, estimatedHours: hours, confidence, suggestedAddOns: addOns };
+  return { ...r, estimatedHours: hours, confidence, volumeCubicYards, suggestedAddOns: addOns };
 }
 
 // Deterministic heuristic used when no API key is set, on provider failure, or when

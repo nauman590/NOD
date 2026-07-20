@@ -19,7 +19,9 @@ export default function ProviderSignup() {
   const photoRef = useRef<HTMLInputElement>(null);
 
   const set = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
-  const valid = form.fullName && form.email && form.phone && form.password.length >= 6 && form.vehicleType;
+  // Driver's license + profile photo are required (brief) — both must be uploaded to submit.
+  const valid =
+    form.fullName && form.email && form.phone && form.password.length >= 6 && form.vehicleType && form.licenseUrl && form.profilePhotoUrl;
 
   const handleUpload = async (which: "license" | "photo", file: File) => {
     setUploading((u) => ({ ...u, [which]: true }));

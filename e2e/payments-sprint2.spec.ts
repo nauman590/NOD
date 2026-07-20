@@ -6,7 +6,7 @@ const API = "http://localhost:3001/api";
 async function registerProvider(request: any) {
   const email = `sprint2_${Date.now()}_${Math.floor(Math.random() * 1e6)}@nod.app`;
   const reg = await request.post(`${API}/auth/register/provider`, {
-    data: { email, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "Sprint2 Bot" },
+    data: { email, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "Sprint2 Bot", licenseUrl: "http://x/license.jpg", profilePhotoUrl: "http://x/pro.jpg" },
   });
   expect(reg.ok()).toBeTruthy();
   const { accessToken } = await reg.json();

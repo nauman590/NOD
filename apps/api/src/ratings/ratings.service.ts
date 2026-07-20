@@ -20,14 +20,27 @@ export class RatingsService {
 
     if (user.provider) {
       const since = new Date(Date.now() - 30 * 86400000);
-      const agg = await this.prisma.rating.aggregate({
+      const windowAgg = await this.prisma.rating.aggregate({
         where: { rateeId: rateeUserId, createdAt: { gte: since } },
         _avg: { stars: true },
         _count: true,
       });
-      const avg = agg._avg.stars ?? 0;
-      await this.prisma.provider.update({ where: { id: user.provider.id }, data: { ratingAvg: avg, ratingCount: agg._count } });
-      return { isProvider: true as const, providerId: user.provider.id, avg, count: agg._count };
+      let avg = windowAgg._avg.stars ?? 0;
+      let count = windowAgg._count;
+      if (count === 0) {
+        // No ratings in the rolling 30-day window (e.g. an admin edited an OLD rating, or
+        // recent reviews aged out). Fall back to the all-time aggregate so the stored figure
+        // doesn't collapse to 0.0 — which reads as "terrible service" and is unfair.
+        const allTime = await this.prisma.rating.aggregate({
+          where: { rateeId: rateeUserId },
+          _avg: { stars: true },
+          _count: true,
+        });
+        avg = allTime._avg.stars ?? 0;
+        count = allTime._count;
+      }
+      await this.prisma.provider.update({ where: { id: user.provider.id }, data: { ratingAvg: avg, ratingCount: count } });
+      return { isProvider: true as const, providerId: user.provider.id, avg, count };
     }
 
     const agg = await this.prisma.rating.aggregate({ where: { rateeId: rateeUserId }, _avg: { stars: true }, _count: true });

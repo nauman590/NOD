@@ -27,7 +27,7 @@ test.describe.configure({ timeout: 120_000 });
 async function registerProvider() {
   const email = `s4_pro_${uniq()}@nod.app`;
   const res = await ctx.post(`${API}/auth/register/provider`, {
-    data: { email, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "S4 Pro" },
+    data: { email, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "S4 Pro", licenseUrl: "http://x/license.jpg", profilePhotoUrl: "http://x/pro.jpg" },
   });
   expect(res.ok()).toBeTruthy();
   const body = await res.json();

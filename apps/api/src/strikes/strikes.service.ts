@@ -47,7 +47,10 @@ export class StrikesService {
     let extra: Record<string, unknown> = {};
     if (last90 >= 5) {
       statusChange = ProviderStatus.DEACTIVATED;
-    } else if (last30 >= 3) {
+    } else if (last30 >= 3 && provider.status !== ProviderStatus.DEACTIVATED) {
+      // Only suspend if not already DEACTIVATED — as older strikes age out of the 90-day
+      // window, last90 can dip below 5 while last30 is still ≥3, which would otherwise
+      // DOWNGRADE a deactivated provider back to a temporary 7-day suspension.
       statusChange = ProviderStatus.SUSPENDED;
       extra = { suspendedUntil: new Date(now + 7 * DAY) };
     }

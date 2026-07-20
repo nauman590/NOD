@@ -77,6 +77,19 @@ export function refreshAccessToken(): Promise<boolean> {
   return refreshInFlight;
 }
 
+// Read a response body as JSON, tolerating non-JSON payloads. A reverse proxy / gateway
+// can return an HTML 502/504; JSON.parse-ing that used to throw a SyntaxError that escaped
+// api()/uploadFile and crashed the caller instead of surfacing a clean ApiError.
+async function parseBody(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: res.ok ? "Unexpected non-JSON response from the server." : `Server error (${res.status})` };
+  }
+}
+
 async function doFetch(path: string, method: string, body: unknown, token: string | null) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -102,8 +115,7 @@ export async function api<T = any>(
     if (ok) res = await doFetch(path, method, opts.body, getAccessToken());
   }
 
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  const data = await parseBody(res);
   if (!res.ok) throw new ApiError(res.status, data);
   return data as T;
 }
@@ -122,8 +134,7 @@ export async function uploadFile(file: File): Promise<{ url: string }> {
     const ok = await refreshAccessToken();
     if (ok) res = await send(getAccessToken());
   }
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  const data = await parseBody(res);
   if (!res.ok) throw new ApiError(res.status, data);
   return data as { url: string };
 }

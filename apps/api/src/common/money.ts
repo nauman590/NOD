@@ -31,9 +31,13 @@ export function providerPayout(
 // Junk removal is partly volume-priced: the AI's cubic-yard estimate becomes a real
 // charge on top of crew labor. Handyman scales labor by the AI's complexity read.
 export const CUBIC_YARD_RATE_CENTS = 1200; // $12 per estimated cubic yard
+// Defensive cap (mirrors estimator's MAX_VOLUME_CUBIC_YARDS): even if an unclamped value
+// reaches here, the volume charge can never exceed ~40 yd × $12.
+export const MAX_VOLUME_CUBIC_YARDS = 40;
 
 export function volumePriceCents(cubicYards: number): number {
-  return Math.round(Math.max(0, cubicYards || 0) * CUBIC_YARD_RATE_CENTS);
+  const yards = Math.min(Math.max(0, cubicYards || 0), MAX_VOLUME_CUBIC_YARDS);
+  return Math.round(yards * CUBIC_YARD_RATE_CENTS);
 }
 
 export function complexityMultiplier(complexity: "low" | "medium" | "high"): number {

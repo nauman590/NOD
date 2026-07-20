@@ -27,7 +27,7 @@ async function seedDisputedJob(request: any) {
   const categoryId = (await (await request.get(`${API}/categories`)).json()).find((c: any) => c.slug === "junk").id;
 
   const pro = await (
-    await request.post(`${API}/auth/register/provider`, { data: { email: `s5ui_pro_${uniq()}@nod.app`, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "UI Pro" } })
+    await request.post(`${API}/auth/register/provider`, { data: { email: `s5ui_pro_${uniq()}@nod.app`, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "UI Pro", licenseUrl: "http://x/license.jpg", profilePhotoUrl: "http://x/pro.jpg" } })
   ).json();
   await request.post(`${API}/admin/providers/${pro.provider.id}/background`, { headers: bearer(admin.accessToken), data: { result: "PASSED" } });
   await request.post(`${API}/admin/providers/${pro.provider.id}/approve`, { headers: bearer(admin.accessToken) });

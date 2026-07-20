@@ -137,3 +137,10 @@ export interface JobCard {
 
 export const dollars = (cents: number) => `$${Math.round(cents / 100)}`;
 export const dollars2 = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+// Provider payout math — MUST match the server (apps/api/src/common/money.ts): the
+// platform fee is round(base × 18%) and the provider keeps the remainder. Computing the
+// net as base × 0.82 diverges by ±1¢ on odd amounts, so mirror the server exactly.
+export const PLATFORM_FEE_RATE = 0.18;
+export const platformFeeCents = (baseCents: number) => Math.round(baseCents * PLATFORM_FEE_RATE);
+export const providerBaseNetCents = (baseCents: number) => baseCents - platformFeeCents(baseCents);

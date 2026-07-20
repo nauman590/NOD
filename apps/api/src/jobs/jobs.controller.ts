@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { Role } from "@prisma/client";
 import { JobsService } from "./jobs.service";
-import { CreateJobDto, AddAdjustmentsDto, LocationDto } from "./dto";
+import { CreateJobDto, AddAdjustmentsDto, LocationDto, CancelJobDto } from "./dto";
 import { CurrentUser, AuthUser, Roles } from "../common/decorators";
 
 @Controller("jobs")
@@ -92,8 +92,8 @@ export class JobsController {
   }
 
   @Post(":id/cancel")
-  cancel(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.jobs.cancel(id, user);
+  cancel(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() dto: CancelJobDto) {
+    return this.jobs.cancel(id, user, dto.reason);
   }
 
   @Roles(Role.PROVIDER)

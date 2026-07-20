@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, MinLength, IsBoolean } from "class-validator";
+import { IsEmail, IsOptional, IsString, MinLength, IsBoolean, IsNotEmpty } from "class-validator";
 
 export class RegisterCustomerDto {
   @IsOptional() @IsEmail() email?: string;
@@ -16,8 +16,9 @@ export class RegisterProviderDto {
   @IsString() @MinLength(6) password!: string;
   @IsString() fullName!: string;
   @IsOptional() @IsString() vehicleType?: string;
-  @IsOptional() @IsString() licenseUrl?: string;
-  @IsOptional() @IsString() profilePhotoUrl?: string;
+  // Brief: driver's license + profile photo are REQUIRED provider signup fields.
+  @IsString() @IsNotEmpty() licenseUrl!: string;
+  @IsString() @IsNotEmpty() profilePhotoUrl!: string;
   @IsOptional() @IsBoolean() smsOptIn?: boolean;
 }
 

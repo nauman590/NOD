@@ -8,7 +8,7 @@ const API = "http://localhost:3001/api";
 test("provider deposit requires entering a card", async ({ page, request }) => {
   const email = `deptest_${Date.now()}@nod.app`;
   const reg = await request.post(`${API}/auth/register/provider`, {
-    data: { email, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "Deposit Test" },
+    data: { email, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "Deposit Test", licenseUrl: "http://x/license.jpg", profilePhotoUrl: "http://x/pro.jpg" },
   });
   const { accessToken, refreshToken } = await reg.json();
 

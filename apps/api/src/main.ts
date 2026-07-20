@@ -20,9 +20,16 @@ async function bootstrap() {
     }),
   );
 
-  // CORS origins from env (comma-separated); "*" reflects any origin.
+  // CORS origins from env (comma-separated); "*" reflects any origin. When wildcard, we
+  // must NOT also send credentials — reflecting an arbitrary origin WITH credentials lets
+  // any site make credentialed cross-origin requests. (Auth here is a Bearer header, not a
+  // cookie, so disabling credentials on wildcard is safe.)
   const corsEnv = (process.env.CORS_ORIGINS || "http://localhost:5173").trim();
-  app.enableCors({ origin: corsEnv === "*" ? true : corsEnv.split(",").map((s) => s.trim()), credentials: true });
+  const corsWildcard = corsEnv === "*";
+  app.enableCors({
+    origin: corsWildcard ? true : corsEnv.split(",").map((s) => s.trim()),
+    credentials: !corsWildcard,
+  });
   app.setGlobalPrefix("api");
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false }));
 

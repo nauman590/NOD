@@ -9,6 +9,19 @@ class AdjustRatingDto {
   @IsOptional() @IsString() comment?: string;
 }
 
+class RefundDto {
+  // Partial refund amount in cents; omit for a full refund. Must be a positive integer —
+  // an unvalidated "abc"/negative previously reached Stripe as NaN → 500.
+  @IsOptional() @IsInt() @Min(1) amountCents?: number;
+}
+
+class SuspendCustomerDto {
+  @IsOptional() @IsString() reason?: string;
+  // Days must be a positive integer — `days:-5` previously produced a past suspendedUntil
+  // (a silent no-op), and "abc" a NaN date. Capped at 10 years.
+  @IsOptional() @IsInt() @Min(1) @Max(3650) days?: number;
+}
+
 @Roles(Role.ADMIN)
 @Controller("admin")
 export class AdminController {
@@ -31,7 +44,7 @@ export class AdminController {
   }
 
   @Post("payments/:id/refund")
-  refund(@Param("id") id: string, @Body() body: { amountCents?: number }) {
+  refund(@Param("id") id: string, @Body() body: RefundDto) {
     return this.admin.refundPayment(id, body?.amountCents);
   }
 
@@ -41,7 +54,7 @@ export class AdminController {
   }
 
   @Post("customers/:id/suspend")
-  suspendCustomer(@Param("id") id: string, @Body() body: { reason?: string; days?: number }) {
+  suspendCustomer(@Param("id") id: string, @Body() body: SuspendCustomerDto) {
     return this.admin.setCustomerSuspension(id, true, body?.reason, body?.days);
   }
 

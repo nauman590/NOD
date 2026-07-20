@@ -118,6 +118,8 @@ model User {
   // Phone verification OTP (hashed) + expiry. Set by /auth/phone/request-otp, cleared on verify.
   phoneOtpHash      String?
   phoneOtpExpiresAt DateTime?
+  // Wrong-guess counter, persisted so the brute-force cap holds across API instances.
+  phoneOtpAttempts  Int      @default(0)
   passwordHash  String?
   role          Role     @default(CUSTOMER)
   fullName      String?
@@ -310,6 +312,7 @@ model Job {
   cancelledAt      DateTime?
   cancelledBy      CancelledBy?
   cancellationTier CancellationTier?
+  cancellationReason String?         // free-text reason captured at cancel (brief B8)
   delayNoticeAt    DateTime?
   latePenaltyCents Int               @default(0)
 

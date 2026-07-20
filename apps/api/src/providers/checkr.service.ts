@@ -80,12 +80,21 @@ export class CheckrService {
 
   // Public webhook receiver: report.completed → map result to backgroundCheckStatus.
   async handleWebhook(raw: Buffer | undefined, signature?: string) {
-    if (this.webhookSecret) {
-      if (!raw) throw new BadRequestException("missing raw body");
-      const expected = crypto.createHmac("sha256", this.webhookSecret).update(raw).digest("hex");
-      if (!signature || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
-        throw new UnauthorizedException("invalid Checkr signature");
-      }
+    // Fail closed: without a signing secret we cannot verify the sender, and this handler
+    // flips a provider's background-check status — so refuse to process rather than trust
+    // anything. (Checkr is only live when both the API key and webhook secret are set.)
+    if (!this.webhookSecret) {
+      this.logger.warn("Rejecting Checkr webhook — CHECKR_WEBHOOK_SECRET is not configured.");
+      throw new UnauthorizedException("Checkr webhook secret is not configured");
+    }
+    if (!raw) throw new BadRequestException("missing raw body");
+    const expected = crypto.createHmac("sha256", this.webhookSecret).update(raw).digest("hex");
+    const expectedBuf = Buffer.from(expected, "utf8");
+    const signatureBuf = Buffer.from(signature || "", "utf8");
+    // timingSafeEqual throws on unequal lengths — check length first so a wrong-length
+    // signature is a clean 401, not an unhandled 500.
+    if (expectedBuf.length !== signatureBuf.length || !crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
+      throw new UnauthorizedException("invalid Checkr signature");
     }
     const event = JSON.parse((raw ?? Buffer.from("{}")).toString("utf8"));
     if (event?.type !== "report.completed") return { ignored: event?.type ?? "unknown" };

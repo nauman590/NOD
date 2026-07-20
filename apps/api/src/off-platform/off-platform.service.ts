@@ -105,9 +105,17 @@ export class OffPlatformService {
     if (!user) throw new NotFoundException("reported user not found");
 
     if (user.role === Role.PROVIDER && user.provider) {
+      const bannedUntil = new Date(Date.now() + BAN_DAYS * 86400000);
       await this.prisma.provider.update({
         where: { id: user.provider.id },
-        data: { status: ProviderStatus.DEACTIVATED, suspendedUntil: new Date(Date.now() + BAN_DAYS * 86400000) },
+        data: { status: ProviderStatus.DEACTIVATED, suspendedUntil: bannedUntil },
+      });
+      // Also suspend the USER account — deactivating only the provider row still lets them
+      // log in (login() checks user.suspendedUntil). Mirror the customer ban so a banned
+      // provider is actually locked out.
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { suspendedUntil: bannedUntil, suspendedReason: "Off-platform payment solicitation (verified) — banned" },
       });
       await this.notifications.notify({
         userId,

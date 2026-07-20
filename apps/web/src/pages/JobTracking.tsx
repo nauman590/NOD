@@ -78,7 +78,7 @@ export default function JobTracking() {
     onSuccess: invalidate,
   });
   const cancelJob = useMutation({
-    mutationFn: () => api(`/jobs/${jobId}/cancel`, { method: "POST" }),
+    mutationFn: (reason?: string) => api(`/jobs/${jobId}/cancel`, { method: "POST", body: reason ? { reason } : undefined }),
     onSuccess: invalidate,
   });
   const reportNoShow = useMutation({
@@ -106,8 +106,10 @@ export default function JobTracking() {
         : IN_TRANSIT.has(job.status)
           ? "Your pro is already on the way, so a 25% cancellation fee applies."
           : "A $10 cancellation fee applies.";
-    if (await modal.confirm({ title: "Cancel this job?", body: feeText, confirmLabel: "Cancel job", cancelLabel: "Keep job" }))
-      cancelJob.mutate();
+    if (await modal.confirm({ title: "Cancel this job?", body: feeText, confirmLabel: "Cancel job", cancelLabel: "Keep job" })) {
+      const reason = window.prompt("Optionally, tell us why you're cancelling:")?.trim() || undefined;
+      cancelJob.mutate(reason);
+    }
   };
 
   if (!job) return <main className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">Loading…</main>;

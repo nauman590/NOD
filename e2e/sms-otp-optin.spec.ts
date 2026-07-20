@@ -32,7 +32,7 @@ async function registerProvider(smsOptIn?: boolean) {
   const email = `sms_pro_${uniq()}@nod.app`;
   const fullName = `SMS Pro ${uniq()}`;
   const res = await ctx.post(`${API}/auth/register/provider`, {
-    data: { email, phone: uniqPhone(), password: "provider1234", fullName, vehicleType: "van", ...(smsOptIn !== undefined ? { smsOptIn } : {}) },
+    data: { email, phone: uniqPhone(), password: "provider1234", fullName, vehicleType: "van", licenseUrl: "http://x/license.jpg", profilePhotoUrl: "http://x/pro.jpg", ...(smsOptIn !== undefined ? { smsOptIn } : {}) },
   });
   expect(res.ok()).toBeTruthy();
   const body = await res.json();

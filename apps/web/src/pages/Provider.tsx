@@ -275,7 +275,22 @@ function ActiveCard({ job }: { job: Job }) {
   useLocationBroadcast(job.id, navigating);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["active"] });
-  const act = (path: string) => api(`/jobs/${job.id}/${path}`, { method: "POST" }).then(refresh);
+  const [acting, setActing] = useState(false);
+  // Lifecycle step actions (en-route / arrived / start / delay-notice) can legitimately
+  // fail (e.g. a photo gate or a terminal-state guard), so surface the error and hold a
+  // busy state instead of firing an unhandled rejection and leaving the button live.
+  const act = async (path: string) => {
+    if (acting) return;
+    setActing(true);
+    try {
+      await api(`/jobs/${job.id}/${path}`, { method: "POST" });
+      refresh();
+    } catch (e: any) {
+      await modal.alert("Couldn't update the job", e?.message || "Please try again.");
+    } finally {
+      setActing(false);
+    }
+  };
 
   const nextStep: Record<string, { label: string; path: string } | null> = {
     CLAIMED: { label: "Start driving", path: "en-route" },
@@ -409,10 +424,10 @@ function ActiveCard({ job }: { job: Job }) {
           <>
             <button
               onClick={() => act(step.path)}
-              disabled={step.path === "arrived" && !hasBefore}
+              disabled={(step.path === "arrived" && !hasBefore) || acting}
               className="mt-4 flex h-12 w-full items-center justify-center rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-md shadow-primary/30 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
             >
-              {step.label}
+              {acting ? "Working…" : step.label}
             </button>
             {step.path === "arrived" && !hasBefore && (
               <p className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-amber-600">
@@ -504,6 +519,7 @@ function StatusBadge({ status }: { status: Job["status"] }) {
 
 function ProviderPhotos({ job, allowAfter = true }: { job: Job; allowAfter?: boolean }) {
   const qc = useQueryClient();
+  const modal = useModal();
   const [busy, setBusy] = useState<null | "BEFORE" | "AFTER">(null);
   const refs = { BEFORE: useRef<HTMLInputElement>(null), AFTER: useRef<HTMLInputElement>(null) };
 
@@ -521,6 +537,10 @@ function ProviderPhotos({ job, allowAfter = true }: { job: Job; allowAfter?: boo
       });
       await api(`/jobs/${job.id}/photos`, { method: "POST", body: { kind, url, ...coords } });
       qc.invalidateQueries({ queryKey: ["active"] });
+    } catch (e: any) {
+      // Upload can fail (rejected file type, network). Tell the pro instead of silently
+      // swallowing it — the photo gate would otherwise seem broken.
+      await modal.alert("Photo upload failed", e?.message || "Please try again.");
     } finally {
       setBusy(null);
     }

@@ -52,6 +52,18 @@ export default function ReportIssue() {
     queryFn: () => api<DisputeThreadItem[]>(`/jobs/${jobId}/disputes`),
   });
 
+  // On a COMPLETED job the payout has already been transferred, so there's nothing to hold in
+  // escrow — recovery is a claw-back from the provider's future payouts. Only pre-completion
+  // disputes actually hold funds. Word the copy accordingly instead of always promising escrow.
+  const { data: job } = useQuery({
+    queryKey: ["job", jobId],
+    queryFn: () => api<{ status: string }>(`/jobs/${jobId}`),
+  });
+  const isCompletedJob = job?.status === "COMPLETE";
+  const resolutionCopy = isCompletedJob
+    ? "If we uphold your report, we'll refund you and recover it from the provider's future payouts."
+    : "Captured funds are held until we resolve it.";
+
   // Attach a photo to an already-open dispute (evidence added after filing).
   const addEvidence = async (file: File, disputeId: string) => {
     setAddingTo(disputeId);
@@ -99,7 +111,7 @@ export default function ReportIssue() {
         );
       } else {
         await api(`/jobs/${jobId}/disputes`, { method: "POST", body: { reason, description, photoUrls: photos } });
-        await modal.alert("Report submitted", "Our team reviews disputes within 24 hours. Captured funds are held in escrow until resolved.");
+        await modal.alert("Report submitted", `Our team reviews disputes within 24 hours. ${resolutionCopy}`);
       }
       navigate(backTo);
     } catch (e: any) {
@@ -116,7 +128,7 @@ export default function ReportIssue() {
         </Link>
 
         <h1 className="mt-6 text-2xl font-bold tracking-tight">Report an issue</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Tell us what went wrong. Captured funds are held until we resolve it.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Tell us what went wrong. {resolutionCopy}</p>
 
         {/* Existing disputes on this job — both parties can follow along and add evidence. */}
         {disputes.length > 0 && (

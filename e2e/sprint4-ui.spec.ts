@@ -49,7 +49,7 @@ test("admin off-platform queue lists a pending report with Verify & ban", async 
 
   const proReg = await (
     await request.post(`${API}/auth/register/provider`, {
-      data: { email: `s4ui_pro_${uniq()}@nod.app`, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "UI Pro" },
+      data: { email: `s4ui_pro_${uniq()}@nod.app`, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "UI Pro", licenseUrl: "http://x/license.jpg", profilePhotoUrl: "http://x/pro.jpg" },
     })
   ).json();
   await request.post(`${API}/admin/providers/${proReg.provider.id}/background`, { headers: bearer(admin.accessToken), data: { result: "PASSED" } });
@@ -83,7 +83,7 @@ test("provider dashboard shows a Completed tab", async ({ page, request }) => {
 
   const proReg = await (
     await request.post(`${API}/auth/register/provider`, {
-      data: { email: `s4ui_pro2_${uniq()}@nod.app`, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "Tab Pro" },
+      data: { email: `s4ui_pro2_${uniq()}@nod.app`, phone: `+1555${Date.now() % 10000000}`, password: "provider1234", fullName: "Tab Pro", licenseUrl: "http://x/license.jpg", profilePhotoUrl: "http://x/pro.jpg" },
     })
   ).json();
   await request.post(`${API}/admin/providers/${proReg.provider.id}/background`, { headers: bearer(admin.accessToken), data: { result: "PASSED" } });

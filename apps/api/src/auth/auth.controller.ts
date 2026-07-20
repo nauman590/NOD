@@ -77,6 +77,9 @@ export class AuthController {
     return this.auth.requestPhoneOtp(user.id, dto.phone);
   }
 
+  // Cap guesses per IP too (defense-in-depth alongside the per-user attempt cap) so the
+  // 6-digit code can't be brute-forced.
+  @Throttle({ default: { limit: 10, ttl: 600000 } })
   @Post("phone/verify-otp")
   verifyOtp(@CurrentUser() user: AuthUser, @Body() dto: VerifyOtpDto) {
     return this.auth.verifyPhoneOtp(user.id, dto.code);

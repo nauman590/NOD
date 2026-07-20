@@ -5,7 +5,7 @@ import { ArrowLeft, Plus, Trash2, Check, Clock, MapPin } from "lucide-react";
 import { api } from "@/lib/api";
 import { uid } from "@/lib/utils";
 import type { Job } from "@/lib/types";
-import { dollars, dollars2 } from "@/lib/types";
+import { dollars, dollars2, providerBaseNetCents } from "@/lib/types";
 
 interface LineItem {
   id: string;
@@ -18,6 +18,8 @@ export default function ProviderAdjust() {
   const navigate = useNavigate();
   const [items, setItems] = useState<LineItem[]>([{ id: uid(), description: "", priceCents: 0 }]);
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Adjust price — Tasker";
@@ -27,7 +29,7 @@ export default function ProviderAdjust() {
 
   const validItems = items.filter((i) => i.description.trim() && i.priceCents > 0);
   const addOnTotal = validItems.reduce((s, i) => s + i.priceCents, 0);
-  const newPayout = useMemo(() => (job ? Math.round(job.basePriceCents * 0.82) + addOnTotal : 0), [job, addOnTotal]);
+  const newPayout = useMemo(() => (job ? providerBaseNetCents(job.basePriceCents) + addOnTotal : 0), [job, addOnTotal]);
   const newTotal = useMemo(() => (job ? job.basePriceCents + addOnTotal : 0), [job, addOnTotal]);
 
   if (!job) return null;
@@ -37,11 +39,19 @@ export default function ProviderAdjust() {
   const add = () => setItems((p) => [...p, { id: uid(), description: "", priceCents: 0 }]);
 
   const send = async () => {
-    await api(`/jobs/${jobId}/adjustments`, {
-      method: "POST",
-      body: { items: validItems.map((i) => ({ description: i.description, priceCents: i.priceCents })) },
-    });
-    setSent(true);
+    if (sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      await api(`/jobs/${jobId}/adjustments`, {
+        method: "POST",
+        body: { items: validItems.map((i) => ({ description: i.description, priceCents: i.priceCents })) },
+      });
+      setSent(true);
+    } catch (e: any) {
+      setError(e?.message || "Couldn't send the adjustments. Please try again.");
+      setSending(false);
+    }
   };
 
   if (sent) {
@@ -91,7 +101,7 @@ export default function ProviderAdjust() {
         <div className="mt-4 rounded-3xl border border-border bg-card p-5">
           <div className="flex items-baseline justify-between">
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Original payout</span>
-            <span className="text-2xl font-bold tracking-tight text-primary">{dollars(Math.round(job.basePriceCents * 0.82))}</span>
+            <span className="text-2xl font-bold tracking-tight text-primary">{dollars(providerBaseNetCents(job.basePriceCents))}</span>
           </div>
         </div>
 
@@ -163,12 +173,13 @@ export default function ProviderAdjust() {
 
       <div className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-background/95 px-5 py-4 backdrop-blur">
         <div className="mx-auto w-full max-w-md">
+          {error && <p className="mb-2 text-center text-xs font-medium text-destructive">{error}</p>}
           <button
-            disabled={validItems.length === 0}
+            disabled={validItems.length === 0 || sending}
             onClick={send}
             className="flex h-14 w-full items-center justify-center rounded-2xl bg-primary text-base font-semibold text-primary-foreground shadow-lg shadow-primary/30 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
           >
-            Send to customer for approval
+            {sending ? "Sending…" : "Send to customer for approval"}
           </button>
         </div>
       </div>

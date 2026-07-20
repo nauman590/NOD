@@ -17,7 +17,12 @@ import { RealtimeService } from "./realtime.service";
 import { getAccessSecret } from "../common/jwt-secret";
 
 const CORS_ENV = (process.env.CORS_ORIGINS || "http://localhost:5173").trim();
-const GATEWAY_CORS = { origin: CORS_ENV === "*" ? true : CORS_ENV.split(",").map((s) => s.trim()), credentials: true };
+// Same rule as the HTTP CORS: never reflect an arbitrary origin WITH credentials.
+const CORS_WILDCARD = CORS_ENV === "*";
+const GATEWAY_CORS = {
+  origin: CORS_WILDCARD ? true : CORS_ENV.split(",").map((s) => s.trim()),
+  credentials: !CORS_WILDCARD,
+};
 
 @WebSocketGateway({ namespace: "/realtime", cors: GATEWAY_CORS })
 export class EventsGateway implements OnGatewayInit, OnGatewayConnection {
