@@ -8,6 +8,7 @@ export default function ProviderSignup() {
   const navigate = useNavigate();
   const { registerProvider } = useAuth();
   const [form, setForm] = useState({ fullName: "", email: "", phone: "", password: "", vehicleType: "", licenseUrl: "", profilePhotoUrl: "" });
+  const [smsOptIn, setSmsOptIn] = useState(true); // brief: defaults to checked
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -34,7 +35,7 @@ export default function ProviderSignup() {
     setBusy(true);
     setError(null);
     try {
-      await registerProvider(form);
+      await registerProvider({ ...form, smsOptIn } as any);
       navigate("/provider/onboarding");
     } catch (e: any) {
       setError(e?.message || "Signup failed");
@@ -76,6 +77,11 @@ export default function ProviderSignup() {
               <UploadButton uploading={uploading.photo} done={false} onClick={() => photoRef.current?.click()} label="Upload photo" />
             )}
           </F>
+
+          <label className="flex items-start gap-2.5 pt-1 cursor-pointer">
+            <input type="checkbox" checked={smsOptIn} onChange={(e) => setSmsOptIn(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border accent-primary" />
+            <span className="text-sm text-muted-foreground">Text me SMS updates (new jobs in my area, add-on decisions, payouts). You can turn this off anytime.</span>
+          </label>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
           <p className="text-xs text-muted-foreground">An admin reviews every provider (background check) before activation.</p>

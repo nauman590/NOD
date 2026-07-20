@@ -50,6 +50,9 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection {
       socket.data.userId = userId;
       socket.data.role = role;
 
+      // Every socket joins its per-user room so notifications can reach the user by id.
+      socket.join(this.realtime.userRoom(userId));
+
       if (role === Role.ADMIN) {
         socket.join(this.realtime.adminRoom());
       } else if (role === Role.PROVIDER) {

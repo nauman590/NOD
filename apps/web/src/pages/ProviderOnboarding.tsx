@@ -3,12 +3,15 @@ import { useNavigate, Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
-import { CheckCircle2, Clock, CreditCard, Landmark } from "lucide-react";
+import { CheckCircle2, Clock, CreditCard, Landmark, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { getStripe } from "@/lib/stripe";
 import { useAuth } from "@/lib/auth";
 import { useModal, Modal } from "@/components/ui/Modal";
+import { dollars2 } from "@/lib/types";
 import type { Category } from "@/lib/types";
+
+type PayoutBalance = { instantAvailableCents: number; availableCents: number; pendingCents: number; payoutsEnabled: boolean };
 
 const stripePromise = getStripe();
 const CARD_STYLE = { style: { base: { fontSize: "16px", color: "#1e293b", "::placeholder": { color: "#94a3b8" } }, invalid: { color: "#dc2626" } } };
@@ -36,6 +39,28 @@ export default function ProviderOnboarding() {
     queryFn: () => api<{ connected: boolean; payoutsEnabled: boolean }>("/providers/me/connect/status"),
     enabled: !!user && user.role === "PROVIDER",
   });
+
+  // Instant-payout balance — only fetched once payouts are actually enabled.
+  const { data: balance, refetch: refetchBalance } = useQuery({
+    queryKey: ["payout-balance"],
+    queryFn: () => api<PayoutBalance>("/providers/me/payouts/balance"),
+    enabled: !!user && user.role === "PROVIDER" && !!connect?.payoutsEnabled,
+  });
+  const [cashOutBusy, setCashOutBusy] = useState(false);
+  const instantAvail = balance?.instantAvailableCents ?? 0;
+
+  const cashOut = async () => {
+    setCashOutBusy(true);
+    try {
+      const r = await api<{ amountCents: number; status: string }>("/providers/me/payouts/instant", { method: "POST" });
+      await modal.alert("Instant payout sent", `${dollars2(r.amountCents)} is on its way to your debit card (usually within minutes).`);
+      refetchBalance();
+    } catch (e: any) {
+      await modal.alert("Couldn't cash out", e?.message || "Please try again in a moment.");
+    } finally {
+      setCashOutBusy(false);
+    }
+  };
 
   const startPayouts = async () => {
     setPayBusy(true);
@@ -97,23 +122,47 @@ export default function ProviderOnboarding() {
 
         {/* Payouts (Stripe Connect) + refundable deposit */}
         <div className="mt-5 space-y-3">
-          <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
-            <div className="flex items-center gap-3">
-              <Landmark className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <div className="font-semibold">Payouts</div>
-                <div className="text-xs text-muted-foreground">
-                  {connect?.payoutsEnabled ? "Bank connected — weekly payouts on" : "Connect a bank to get paid"}
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Landmark className="h-5 w-5 text-muted-foreground" />
+                <div>
+                  <div className="font-semibold">Payouts</div>
+                  <div className="text-xs text-muted-foreground">
+                    {connect?.payoutsEnabled ? "Bank connected — weekly payouts on" : "Connect a bank to get paid"}
+                  </div>
                 </div>
               </div>
+              {connect?.payoutsEnabled ? (
+                <span className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary">Enabled</span>
+              ) : (
+                <button disabled={payBusy} onClick={startPayouts}
+                  className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60">
+                  Set up
+                </button>
+              )}
             </div>
-            {connect?.payoutsEnabled ? (
-              <span className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary">Enabled</span>
-            ) : (
-              <button disabled={payBusy} onClick={startPayouts}
-                className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60">
-                Set up
-              </button>
+
+            {/* Instant payout to debit card — alongside the standard weekly schedule. */}
+            {connect?.payoutsEnabled && (
+              <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+                <div className="flex items-center gap-3">
+                  <Zap className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <div className="text-sm font-semibold">Instant payout</div>
+                    <div className="text-xs text-muted-foreground">
+                      {balance ? `${dollars2(instantAvail)} available to your debit card` : "Checking available balance…"}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  disabled={cashOutBusy || instantAvail <= 0}
+                  onClick={cashOut}
+                  className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  {cashOutBusy ? "Sending…" : "Cash out"}
+                </button>
+              </div>
             )}
           </div>
 

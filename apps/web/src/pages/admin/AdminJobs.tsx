@@ -29,8 +29,8 @@ export default function AdminJobs() {
       <h1 className="text-2xl font-bold tracking-tight">Jobs</h1>
       <p className="mt-1 text-sm text-muted-foreground">All jobs across the platform.</p>
 
-      <div className="mt-6 overflow-hidden rounded-2xl border border-border">
-        <table className="w-full text-sm">
+      <div className="mt-6 overflow-x-auto rounded-2xl border border-border">
+        <table className="w-full min-w-[820px] text-sm">
           <thead className="bg-card text-left text-xs uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="px-4 py-3">Category</th>

@@ -6,7 +6,11 @@ import Estimate from "./pages/Estimate";
 import Checkout from "./pages/Checkout";
 import JobTracking from "./pages/JobTracking";
 import MyJobs from "./pages/MyJobs";
+import CustomerAccount from "./pages/CustomerAccount";
 import CustomerLogin from "./pages/CustomerLogin";
+import CustomerSignup from "./pages/CustomerSignup";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import RateJob from "./pages/RateJob";
 import Provider from "./pages/Provider";
 import ProviderAdjust from "./pages/ProviderAdjust";
@@ -21,6 +25,9 @@ import AdminProviders from "./pages/admin/AdminProviders";
 import AdminCategories from "./pages/admin/AdminCategories";
 import AdminJobs from "./pages/admin/AdminJobs";
 import AdminDisputes from "./pages/admin/AdminDisputes";
+import AdminOffPlatform from "./pages/admin/AdminOffPlatform";
+import AdminCustomers from "./pages/admin/AdminCustomers";
+import AdminPayments from "./pages/admin/AdminPayments";
 import ReportIssue from "./pages/ReportIssue";
 
 function RequireRole({ role, children }: { role: "PROVIDER" | "ADMIN" | "CUSTOMER"; children: ReactNode }) {
@@ -75,7 +82,11 @@ export const router = createBrowserRouter([
   { path: "/estimate", element: <Estimate /> },
   { path: "/checkout", element: <Checkout /> },
   { path: "/login", element: <CustomerLogin /> },
+  { path: "/signup", element: <CustomerSignup /> },
+  { path: "/forgot-password", element: <ForgotPassword /> },
+  { path: "/reset-password", element: <ResetPassword /> },
   { path: "/my-jobs", element: <MyJobs /> },
+  { path: "/account", element: <CustomerAccount /> },
   { path: "/job/:jobId", element: <JobTracking /> },
   { path: "/job/:jobId/rate", element: <RateJob /> },
   { path: "/job/:jobId/report", element: <ReportIssue /> },
@@ -92,9 +103,12 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <AdminDashboard /> },
       { path: "providers", element: <AdminProviders /> },
+      { path: "customers", element: <AdminCustomers /> },
       { path: "categories", element: <AdminCategories /> },
       { path: "jobs", element: <AdminJobs /> },
+      { path: "payments", element: <AdminPayments /> },
       { path: "disputes", element: <AdminDisputes /> },
+      { path: "off-platform", element: <AdminOffPlatform /> },
     ],
   },
   { path: "*", element: <NotFound /> },

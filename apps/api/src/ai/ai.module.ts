@@ -1,8 +1,12 @@
 import { Module } from "@nestjs/common";
-import { OpenAiService } from "./openai.service";
+import { AnthropicEstimatorService } from "./anthropic.service";
+import { OpenAiEstimatorService } from "./openai.service";
+import { EstimatorService } from "./estimator.service";
 
+// Provider-flexible AI pricing module. EstimatorService is the single injectable
+// callers depend on; it dispatches to OpenAI or Claude (or the heuristic) per config.
 @Module({
-  providers: [OpenAiService],
-  exports: [OpenAiService],
+  providers: [OpenAiEstimatorService, AnthropicEstimatorService, EstimatorService],
+  exports: [EstimatorService],
 })
 export class AiModule {}

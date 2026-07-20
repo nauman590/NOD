@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 
 export default function AdminLogin() {
@@ -43,6 +43,11 @@ export default function AdminLogin() {
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password"
             onKeyDown={(e) => e.key === "Enter" && submit()}
             className="h-12 w-full rounded-xl border border-border bg-background px-4 text-base outline-none focus:border-primary focus:ring-4 focus:ring-primary/15" />
+          <div className="text-right">
+            <Link to="/forgot-password?kind=admin" className="text-sm font-medium text-primary hover:underline underline-offset-4">
+              Forgot password?
+            </Link>
+          </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <button disabled={busy} onClick={submit}
             className="flex h-12 w-full items-center justify-center rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-md shadow-primary/30 disabled:opacity-60">

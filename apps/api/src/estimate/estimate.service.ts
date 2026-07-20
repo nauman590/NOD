@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import * as crypto from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProvidersService } from "../providers/providers.service";
-import { OpenAiService } from "../ai/openai.service";
+import { EstimatorService } from "../ai/estimator.service";
 import { MapsService } from "../maps/maps.service";
-import { platformFee, toCents } from "../common/money";
+import { platformFee, toCents, volumePriceCents, complexityMultiplier } from "../common/money";
 import { CreateEstimateDto } from "./dto";
 
 const LOCK_MINUTES = 15;
@@ -14,8 +15,9 @@ export class EstimateService {
   constructor(
     private prisma: PrismaService,
     private providers: ProvidersService,
-    private ai: OpenAiService,
+    private ai: EstimatorService,
     private maps: MapsService,
+    private config: ConfigService,
   ) {}
 
   async create(dto: CreateEstimateDto, customerId?: string) {
@@ -53,13 +55,26 @@ export class EstimateService {
     const avgRateCents = avgFromMarket ?? category.fallbackHourlyRateCents;
     const rateSource = avgFromMarket !== null ? "market" : "fallback";
 
+    // Per-category price levers: handyman scales labor by complexity; junk adds a real
+    // volume charge from the AI's cubic-yard estimate (previously cosmetic values).
+    const complexityFactor = category.slug === "handyman" ? complexityMultiplier(ai.complexity) : 1;
+    const volumeCents = category.slug === "junk" ? volumePriceCents(ai.volumeCubicYards) : 0;
+
     const laborHours = isDelivery ? ai.estimatedHours + (driveTimeHours ?? 0) : ai.estimatedHours;
-    const laborCents = Math.round(laborHours * avgRateCents);
+    const laborCents = Math.round(laborHours * avgRateCents * complexityFactor);
     const mileageCents = isDelivery ? Math.round((distanceMiles ?? 0) * category.perMileFeeCents) : 0;
+
+    // Provider-pool → customer distance feeds the estimate (AI Pricing Engine). The pool
+    // dispatches from SERVICE_HUB_ADDRESS; the trip to the customer is a per-mile fee.
+    const customerLocation = isDelivery ? dto.pickupAddress : (dto.serviceAddress ?? undefined);
+    const poolDistanceMiles = await this.maps.poolDistanceMiles(customerLocation);
+    const tripFeePerMileCents = parseInt(this.config.get<string>("TRIP_FEE_PER_MILE_CENTS") || "150", 10);
+    const tripCents = Math.round(poolDistanceMiles * tripFeePerMileCents);
+
     const baseFeeCents = category.baseFeeCents;
     const disposalFeeCents = category.disposalFeeCents;
 
-    const basePriceCents = laborCents + mileageCents + baseFeeCents + disposalFeeCents;
+    const basePriceCents = laborCents + volumeCents + tripCents + mileageCents + baseFeeCents + disposalFeeCents;
 
     const breakdown = {
       estimatedHours: ai.estimatedHours,
@@ -67,6 +82,11 @@ export class EstimateService {
       avgRateCents,
       rateSource,
       laborCents,
+      complexityFactor,
+      volumeCubicYards: ai.volumeCubicYards,
+      volumeCents,
+      poolDistanceMiles,
+      tripCents,
       mileageCents,
       baseFeeCents,
       disposalFeeCents,

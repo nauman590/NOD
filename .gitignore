@@ -22,5 +22,11 @@ playwright-report/
 .DS_Store
 *.local
 
+# editor / agent tooling (local Claude Code config)
+.claude/
+
+# handoff & reference PDFs (binaries — kept out of the app repo)
+*.pdf
+
 # original Lovable reference (kept out of the app repo)
 loveable-old code/

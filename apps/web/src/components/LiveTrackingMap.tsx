@@ -7,11 +7,12 @@ interface Props {
   lng: number | null;
   lastUpdate: number | null;
   etaMinutes?: number | null;
+  vehicleType?: string | null;
 }
 
 // Shows the provider's live position. Renders a real Google Map when a Maps key is
 // configured; otherwise a graceful live-status card (GPS still streams in real time).
-export default function LiveTrackingMap({ lat, lng, lastUpdate, etaMinutes }: Props) {
+export default function LiveTrackingMap({ lat, lng, lastUpdate, etaMinutes, vehicleType }: Props) {
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
@@ -48,6 +49,7 @@ export default function LiveTrackingMap({ lat, lng, lastUpdate, etaMinutes }: Pr
         <div className="flex items-center justify-between px-4 py-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <Navigation className="h-3.5 w-3.5 text-primary" /> Live location
+            {vehicleType && <span className="text-muted-foreground/80">· {vehicleType}</span>}
           </span>
           {etaMinutes != null && <span>ETA ~{etaMinutes} min</span>}
         </div>
@@ -66,6 +68,13 @@ export default function LiveTrackingMap({ lat, lng, lastUpdate, etaMinutes }: Pr
         <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
           <MapPin className="h-3.5 w-3.5" /> {lat!.toFixed(5)}, {lng!.toFixed(5)}
           {ago != null && <span>· updated {ago}s ago</span>}
+        </div>
+      )}
+      {(etaMinutes != null || vehicleType) && (
+        <div className="mt-1 text-xs text-muted-foreground">
+          {vehicleType && <span>{vehicleType}</span>}
+          {vehicleType && etaMinutes != null && <span> · </span>}
+          {etaMinutes != null && <span>ETA ~{etaMinutes} min</span>}
         </div>
       )}
       <p className="mt-2 text-xs text-muted-foreground">The live map appears here once the Google Maps key is added.</p>

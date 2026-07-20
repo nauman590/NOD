@@ -6,6 +6,8 @@ export class RegisterCustomerDto {
   @IsOptional() @IsString() @MinLength(6) password?: string;
   @IsOptional() @IsString() fullName?: string;
   @IsOptional() @IsBoolean() isGuest?: boolean;
+  // SMS opt-in (brief: defaults to checked). Undefined → true.
+  @IsOptional() @IsBoolean() smsOptIn?: boolean;
 }
 
 export class RegisterProviderDto {
@@ -16,6 +18,16 @@ export class RegisterProviderDto {
   @IsOptional() @IsString() vehicleType?: string;
   @IsOptional() @IsString() licenseUrl?: string;
   @IsOptional() @IsString() profilePhotoUrl?: string;
+  @IsOptional() @IsBoolean() smsOptIn?: boolean;
+}
+
+export class RequestOtpDto {
+  // Optionally set/replace the phone number being verified.
+  @IsOptional() @IsString() phone?: string;
+}
+
+export class VerifyOtpDto {
+  @IsString() @MinLength(4) code!: string;
 }
 
 export class LoginDto {
@@ -31,9 +43,20 @@ export class UpdateAccountDto {
   @IsOptional() @IsString() fullName?: string;
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() profilePhotoUrl?: string;
+  @IsOptional() @IsBoolean() smsOptIn?: boolean;
 }
 
 export class ChangePasswordDto {
   @IsString() currentPassword!: string;
+  @IsString() @MinLength(6) newPassword!: string;
+}
+
+export class ForgotPasswordDto {
+  @IsEmail() email!: string;
+}
+
+export class ResetPasswordDto {
+  @IsString() token!: string;
   @IsString() @MinLength(6) newPassword!: string;
 }

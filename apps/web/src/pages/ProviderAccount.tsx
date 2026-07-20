@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { Camera, Loader2 } from "lucide-react";
+import { api, uploadFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useModal } from "@/components/ui/Modal";
 import ProviderHeader from "@/components/ProviderHeader";
@@ -7,10 +8,13 @@ import ProviderHeader from "@/components/ProviderHeader";
 export default function ProviderAccount() {
   const { user, refreshMe } = useAuth();
   const modal = useModal();
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
 
   const [current, setCurrent] = useState("");
@@ -29,6 +33,24 @@ export default function ProviderAccount() {
       setPhone(user.phone ?? "");
     }
   }, [user]);
+
+  // The provider's avatar lives on the Provider profile (not the User), so fetch it.
+  useEffect(() => {
+    api<any>("/providers/me").then((p) => setPhotoUrl(p?.profilePhotoUrl ?? null)).catch(() => {});
+  }, []);
+
+  const uploadPhoto = async (file: File) => {
+    setUploading(true);
+    try {
+      const { url } = await uploadFile(file);
+      setPhotoUrl(url);
+      await api("/providers/me", { method: "PATCH", body: { profilePhotoUrl: url } });
+    } catch (e: any) {
+      await modal.alert("Couldn't upload", e?.message || "Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const saveProfile = async () => {
     setSavingProfile(true);
@@ -64,6 +86,29 @@ export default function ProviderAccount() {
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto w-full max-w-md px-5 pt-8 pb-24">
         <ProviderHeader title="Account" />
+
+        <section className="mb-6 flex flex-col items-center rounded-3xl border border-border bg-card p-6">
+          <div className="relative">
+            {photoUrl ? (
+              <img src={photoUrl} alt="Your profile" className="h-24 w-24 rounded-full object-cover" />
+            ) : (
+              <div className="flex h-24 w-24 items-center justify-center rounded-full bg-secondary text-3xl font-bold text-muted-foreground">
+                {(fullName || email || "?").trim().charAt(0).toUpperCase()}
+              </div>
+            )}
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              aria-label="Change profile photo"
+              className="absolute -bottom-1 -right-1 flex h-9 w-9 items-center justify-center rounded-full border-2 border-card bg-primary text-primary-foreground shadow-md disabled:opacity-60"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+              onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])} />
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">This photo is shown to customers on your jobs.</p>
+        </section>
 
         <section className="rounded-3xl border border-border bg-card p-5">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Profile</h2>

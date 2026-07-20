@@ -97,21 +97,23 @@ function Analytics() {
 
       <div className="rounded-2xl border border-border bg-card p-5 md:col-span-2">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Provider performance</h2>
-        <table className="mt-3 w-full text-sm">
-          <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-            <tr><th className="py-1">Provider</th><th className="py-1">Jobs</th><th className="py-1">Rating</th><th className="py-1">Status</th></tr>
-          </thead>
-          <tbody>
-            {data.providerPerformance.map((p, i) => (
-              <tr key={i} className="border-t border-border">
-                <td className="py-1.5">{p.name ?? "—"}</td>
-                <td className="py-1.5">{p.jobs}</td>
-                <td className="py-1.5">{p.ratingCount ? `${p.ratingAvg.toFixed(1)}★ (${p.ratingCount})` : "—"}</td>
-                <td className="py-1.5">{p.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="mt-3 w-full min-w-[420px] text-sm">
+            <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+              <tr><th className="py-1">Provider</th><th className="py-1">Jobs</th><th className="py-1">Rating</th><th className="py-1">Status</th></tr>
+            </thead>
+            <tbody>
+              {data.providerPerformance.map((p, i) => (
+                <tr key={i} className="border-t border-border">
+                  <td className="py-1.5">{p.name ?? "—"}</td>
+                  <td className="py-1.5">{p.jobs}</td>
+                  <td className="py-1.5">{p.ratingCount ? `${p.ratingAvg.toFixed(1)}★ (${p.ratingCount})` : "—"}</td>
+                  <td className="py-1.5">{p.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

@@ -32,6 +32,12 @@ export class JobsController {
     return this.jobs.providerActiveJobs(user.id);
   }
 
+  @Roles(Role.PROVIDER)
+  @Get("completed")
+  completed(@CurrentUser() user: AuthUser) {
+    return this.jobs.providerCompletedJobs(user.id);
+  }
+
   @Get(":id")
   get(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.jobs.getJob(id, user);
@@ -94,6 +100,13 @@ export class JobsController {
   @Post(":id/no-show")
   noShow(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.jobs.reportNoShow(id, user.id);
+  }
+
+  // Customer reports that their assigned pro never showed (claim-and-no-show).
+  @Roles(Role.CUSTOMER)
+  @Post(":id/provider-no-show")
+  providerNoShow(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.jobs.reportProviderNoShow(id, user.id);
   }
 
   @Roles(Role.PROVIDER)

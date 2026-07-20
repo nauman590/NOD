@@ -6,9 +6,10 @@ import { PaymentsModule } from "../payments/payments.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { RealtimeModule } from "../realtime/realtime.module";
 import { StrikesModule } from "../strikes/strikes.module";
+import { MapsModule } from "../maps/maps.module";
 
 @Module({
-  imports: [ProvidersModule, PaymentsModule, NotificationsModule, RealtimeModule, StrikesModule],
+  imports: [ProvidersModule, PaymentsModule, NotificationsModule, RealtimeModule, StrikesModule, MapsModule],
   providers: [JobsService],
   controllers: [JobsController],
   exports: [JobsService],

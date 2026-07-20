@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { ProviderStatus, StrikeReason } from "@prisma/client";
+import { PaymentStatus, PaymentType, ProviderStatus, StrikeReason } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
 
@@ -23,6 +23,19 @@ export class StrikesService {
     const strike = await this.prisma.strike.create({
       data: { providerId, reason, feeCents: opts.feeCents ?? 0, jobId: opts.jobId ?? null, note: opts.note ?? null },
     });
+
+    // The held deposit is the primary deduction source: cover the fee from it first, and
+    // leave any uncovered remainder owed (settled from the next payout by settleForPayout).
+    if (strike.feeCents > 0) {
+      const drawn = await this.drawFromDeposit(providerId, strike.feeCents, { reason: `strike:${reason}`, jobId: opts.jobId });
+      if (drawn > 0) {
+        const remaining = strike.feeCents - drawn;
+        await this.prisma.strike.update({
+          where: { id: strike.id },
+          data: remaining > 0 ? { feeCents: remaining } : { feeCents: 0, settledAt: new Date() },
+        });
+      }
+    }
 
     const now = Date.now();
     const [last30, last90] = await Promise.all([
@@ -55,19 +68,64 @@ export class StrikesService {
     return strike;
   }
 
-  // Sum unsettled strike fees, mark them settled, and return the amount to deduct.
-  async settleForPayout(providerId: string): Promise<number> {
+  // Deduct unsettled strike fees from a payout, but never more than the payout can
+  // cover (`availableCents`). Fully-covered strikes are settled; a partially-covered
+  // one has its remaining balance reduced and carries forward to the next payout, so
+  // no fee is ever silently dropped. Returns the amount actually deducted.
+  async settleForPayout(providerId: string, availableCents: number): Promise<number> {
+    if (availableCents <= 0) return 0;
     const open = await this.prisma.strike.findMany({
       where: { providerId, settledAt: null, feeCents: { gt: 0 } },
+      orderBy: { createdAt: "asc" },
       select: { id: true, feeCents: true },
     });
-    if (open.length === 0) return 0;
-    const total = open.reduce((s, x) => s + x.feeCents, 0);
-    await this.prisma.strike.updateMany({
-      where: { id: { in: open.map((x) => x.id) } },
-      data: { settledAt: new Date() },
+
+    let remaining = availableCents;
+    let deducted = 0;
+    for (const strike of open) {
+      if (remaining <= 0) break;
+      const take = Math.min(strike.feeCents, remaining);
+      deducted += take;
+      remaining -= take;
+      if (take >= strike.feeCents) {
+        await this.prisma.strike.update({ where: { id: strike.id }, data: { settledAt: new Date() } });
+      } else {
+        // Partial payment — reduce the outstanding balance, leave it unsettled.
+        await this.prisma.strike.update({ where: { id: strike.id }, data: { feeCents: strike.feeCents - take } });
+      }
+    }
+    return deducted;
+  }
+
+  // Draw a deduction (strike fee or dispute claw-back) from the provider's held deposit
+  // balance — the deposit is the primary deduction source. Returns the amount actually
+  // drawn; the caller recovers any remainder from the next payout. No-ops (returns 0)
+  // when there's no captured deposit or the balance is empty.
+  async drawFromDeposit(
+    providerId: string,
+    amountCents: number,
+    opts: { reason: string; jobId?: string | null } = { reason: "deduction" },
+  ): Promise<number> {
+    if (amountCents <= 0) return 0;
+    const provider = await this.prisma.provider.findUnique({ where: { id: providerId } });
+    const balance = provider?.depositBalanceCents ?? 0;
+    if (!provider || provider.depositStatus !== PaymentStatus.CAPTURED || balance <= 0) return 0;
+    const draw = Math.min(amountCents, balance);
+    await this.prisma.provider.update({ where: { id: providerId }, data: { depositBalanceCents: balance - draw } });
+    await this.prisma.payment.create({
+      data: {
+        userId: provider.userId,
+        jobId: opts.jobId ?? null,
+        type: PaymentType.DEPOSIT_DEDUCTION,
+        status: PaymentStatus.CAPTURED,
+        amountCents: draw,
+        platformFeeCents: 0,
+        providerNetCents: 0,
+        capturedAt: new Date(),
+      },
     });
-    return total;
+    this.logger.warn(`Drew $${(draw / 100).toFixed(2)} from provider ${providerId} deposit for ${opts.reason} (balance ${balance} → ${balance - draw})`);
+    return draw;
   }
 
   async remove(strikeId: string) {

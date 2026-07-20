@@ -53,6 +53,12 @@ export default function CustomerLogin() {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} className={inp} />
           </label>
 
+          <div className="text-right">
+            <Link to="/forgot-password" className="text-sm font-medium text-primary hover:underline underline-offset-4">
+              Forgot password?
+            </Link>
+          </div>
+
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <button disabled={busy || !email || !password} onClick={submit}
@@ -61,7 +67,7 @@ export default function CustomerLogin() {
           </button>
 
           <p className="pt-2 text-center text-sm text-muted-foreground">
-            New here? Just <Link to="/" className="font-semibold text-primary underline underline-offset-4">book a job</Link> — you'll create your account at checkout.
+            New here? <Link to={`/signup?redirect=${encodeURIComponent(redirect)}`} className="font-semibold text-primary underline underline-offset-4">Create an account</Link>
           </p>
         </div>
       </div>

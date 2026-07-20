@@ -1,4 +1,4 @@
-import { PrismaClient, Role, ProviderStatus } from "@prisma/client";
+import { PrismaClient, Role, ProviderStatus, PaymentStatus } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -166,10 +166,12 @@ async function main() {
     });
     const provider = await prisma.provider.upsert({
       where: { userId: user.id },
-      update: { status: ProviderStatus.ACTIVE },
+      // Seed a funded $50 deposit so the demo still works if REQUIRE_DEPOSIT_TO_CLAIM is on.
+      update: { status: ProviderStatus.ACTIVE, depositStatus: PaymentStatus.CAPTURED, depositBalanceCents: 5000 },
       create: {
         userId: user.id, status: ProviderStatus.ACTIVE, vehicleType: p.vehicle,
         backgroundCheckStatus: "STUB_PASSED", approvedAt: new Date(),
+        depositStatus: PaymentStatus.CAPTURED, depositBalanceCents: 5000,
       },
     });
     for (const [slug, rate] of Object.entries(p.rates)) {

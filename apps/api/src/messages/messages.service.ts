@@ -1,9 +1,14 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from "@nestjs/common";
-import { Role } from "@prisma/client";
+import { Role, JobStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeService } from "../realtime/realtime.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { AuthUser } from "../common/decorators";
+
+// In-app chat is withheld until the job is actually in progress (brief: "no phone
+// numbers exchanged until job is in progress"). Reading history stays open to job
+// parties at any status; only *sending* is gated to this window.
+const CHAT_OPEN_STATUSES: JobStatus[] = [JobStatus.IN_PROGRESS, JobStatus.COMPLETE];
 
 @Injectable()
 export class MessagesService {
@@ -13,8 +18,9 @@ export class MessagesService {
     private notifications: NotificationsService,
   ) {}
 
-  // Both parties of the job only; messaging opens once a provider is assigned
-  // (no phone numbers are ever exchanged — chat is the channel).
+  // Both parties of the job (or an admin). Reading is always allowed; sending is
+  // gated to CHAT_OPEN_STATUSES in send() (no phone numbers are ever exchanged —
+  // chat is the only channel).
   private async authorize(jobId: string, user: AuthUser) {
     const job = await this.prisma.job.findUnique({ where: { id: jobId }, include: { provider: true } });
     if (!job) throw new NotFoundException("job not found");
@@ -35,7 +41,8 @@ export class MessagesService {
 
   async send(jobId: string, user: AuthUser, body: string) {
     const { job } = await this.authorize(jobId, user);
-    if (job.status === "AVAILABLE") throw new BadRequestException("messaging opens after a provider claims the job");
+    if (!CHAT_OPEN_STATUSES.includes(job.status))
+      throw new BadRequestException("messaging opens once the job is in progress");
     const text = (body || "").trim();
     if (!text) throw new BadRequestException("empty message");
 

@@ -55,6 +55,27 @@ export class ProvidersService {
     return { url: link!.url };
   }
 
+  // Admin-generated Connect onboarding link for a recruited provider (brief: Sprint 5 —
+  // "Provider Stripe Connect onboarding link Kimball can send to recruited providers").
+  async adminConnectLink(providerId: string) {
+    if (!this.stripe.enabled) throw new BadRequestException("Stripe is not configured");
+    const provider = await this.prisma.provider.findUnique({ where: { id: providerId }, include: { user: true } });
+    if (!provider) throw new NotFoundException("provider not found");
+    let accountId = provider.stripeAccountId;
+    if (!accountId) {
+      const account = await this.stripe.createConnectAccount(provider.user?.email ?? undefined);
+      accountId = account!.id;
+      await this.prisma.provider.update({ where: { id: provider.id }, data: { stripeAccountId: accountId } });
+    }
+    const base = this.config.get<string>("APP_BASE_URL") || "http://localhost:5173";
+    const link = await this.stripe.createAccountLink(
+      accountId,
+      `${base}/provider/onboarding?connect=refresh`,
+      `${base}/provider/onboarding?connect=return`,
+    );
+    return { url: link!.url, providerId: provider.id };
+  }
+
   async connectStatus(userId: string) {
     const provider = await this.providerByUser(userId);
     if (!provider.stripeAccountId || !this.stripe.enabled) {
@@ -64,7 +85,11 @@ export class ProvidersService {
     return { connected: true, ...status };
   }
 
-  // ---- $50 refundable deposit (real charge, held in the platform balance) ----
+  // ---- $50 refundable deposit ----
+  // Hybrid flow (per product decision): a SetupIntent first SAVES the provider's card
+  // on file, then we immediately charge the $50 off-session and hold it in the platform
+  // balance (refundable on good-standing exit). The saved card also stays on the
+  // Customer for any future off-session deduction.
   async collectDeposit(userId: string, paymentMethodId?: string) {
     if (!this.stripe.enabled) throw new BadRequestException("Stripe is not configured");
     if (!paymentMethodId) throw new BadRequestException("A card is required to collect the deposit");
@@ -72,11 +97,46 @@ export class ProvidersService {
     if (provider.depositStatus === PaymentStatus.CAPTURED) {
       return { depositStatus: provider.depositStatus };
     }
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
     const amountCents = parseInt(this.config.get<string>("PROVIDER_DEPOSIT_CENTS") || "5000", 10);
-    const pi = await this.stripe.charge(amountCents, { providerId: provider.id, kind: "deposit" }, paymentMethodId);
+
+    // 1) Ensure a Stripe Customer so the card can be saved & reused.
+    let customerId = provider.stripeCustomerId;
+    if (!customerId) {
+      const customer = await this.stripe.createCustomer(user?.email, { providerId: provider.id });
+      customerId = customer!.id;
+    }
+
+    // 2) SetupIntent saves the card on the Customer (off-session usage), no charge.
+    const setup = await this.stripe.createDepositSetupIntent(
+      { providerId: provider.id, kind: "deposit_setup" },
+      paymentMethodId,
+      customerId,
+      `deposit_setup:${provider.id}`,
+    );
+    const savedCard =
+      (typeof setup!.payment_method === "string" ? setup!.payment_method : setup!.payment_method?.id) || paymentMethodId;
+
+    // 3) Immediately charge the $50 off-session using the saved card; held in the
+    // platform balance. Idempotency-keyed so a retry never double-charges.
+    const pi = await this.stripe.chargeSavedCard(
+      amountCents,
+      customerId,
+      savedCard,
+      { providerId: provider.id, kind: "deposit" },
+      `deposit:${provider.id}`,
+    );
+
     const updated = await this.prisma.provider.update({
       where: { id: provider.id },
-      data: { depositPaymentIntentId: pi!.id, depositStatus: PaymentStatus.CAPTURED, depositRefundedAt: null },
+      data: {
+        stripeCustomerId: customerId,
+        depositSetupId: setup!.id,
+        depositPaymentIntentId: pi!.id,
+        depositStatus: PaymentStatus.CAPTURED,
+        depositBalanceCents: amountCents,
+        depositRefundedAt: null,
+      },
     });
     await this.prisma.payment.create({
       data: {
@@ -93,23 +153,25 @@ export class ProvidersService {
     return { depositStatus: updated.depositStatus };
   }
 
-  // Refund the deposit in full (admin / good-standing deactivation).
+  // Refund the REMAINING held deposit (admin / good-standing deactivation). Only the
+  // balance that wasn't already consumed by strike/claw-back deductions is returned.
   async refundDeposit(providerId: string) {
     const provider = await this.prisma.provider.findUnique({ where: { id: providerId } });
     if (!provider) throw new NotFoundException("provider not found");
     if (provider.depositStatus !== PaymentStatus.CAPTURED || !provider.depositPaymentIntentId) return { refunded: false };
-    if (this.stripe.enabled) {
+    const refundCents = provider.depositBalanceCents ?? 0;
+    if (this.stripe.enabled && refundCents > 0) {
       try {
-        await this.stripe.refund(provider.depositPaymentIntentId);
+        await this.stripe.refund(provider.depositPaymentIntentId, refundCents);
       } catch {
         /* leave status if refund fails */
       }
     }
     await this.prisma.provider.update({
       where: { id: providerId },
-      data: { depositStatus: PaymentStatus.REFUNDED, depositRefundedAt: new Date() },
+      data: { depositStatus: PaymentStatus.REFUNDED, depositBalanceCents: 0, depositRefundedAt: new Date() },
     });
-    return { refunded: true };
+    return { refunded: true, refundedCents: refundCents };
   }
 
   async getRates(userId: string) {
@@ -146,6 +208,17 @@ export class ProvidersService {
     return Math.round(sum / rows.length);
   }
 
+  // Active providers serving a category (for the "new job available" broadcast). Returns
+  // the provider id + userId (+ smsOptIn) capped at `limit`, so the caller can notify them.
+  async activeProvidersForCategory(categoryId: string, limit = 25): Promise<{ id: string; userId: string }[]> {
+    const rates = await this.prisma.providerCategoryRate.findMany({
+      where: { categoryId, active: true, provider: { status: ProviderStatus.ACTIVE } },
+      select: { provider: { select: { id: true, userId: true } } },
+      take: limit,
+    });
+    return rates.map((r) => r.provider);
+  }
+
   // Categories this provider is active in (for the job feed).
   async activeCategoryIds(userId: string): Promise<string[]> {
     const provider = await this.prisma.provider.findUnique({
@@ -165,6 +238,23 @@ export class ProvidersService {
     return provider;
   }
 
+  // Whether a funded $50 deposit is required before a provider can claim jobs.
+  // Off by default (dev/demo/E2E claim without a deposit); operators enable it in prod.
+  get depositRequiredToClaim(): boolean {
+    return (this.config.get<string>("REQUIRE_DEPOSIT_TO_CLAIM") || "false").trim().toLowerCase() === "true";
+  }
+
+  // Gate used specifically at claim time: active AND (when required) a captured deposit
+  // on file. Deliberately NOT part of assertActiveProvider, so a provider mid-job can
+  // still progress (en-route/arrive/complete) even if this flag flips on later.
+  async assertCanClaim(userId: string) {
+    const provider = await this.assertActiveProvider(userId);
+    if (this.depositRequiredToClaim && provider.depositStatus !== PaymentStatus.CAPTURED) {
+      throw new ForbiddenException("Pay your $50 refundable deposit before claiming jobs.");
+    }
+    return provider;
+  }
+
   async earnings(userId: string) {
     const provider = await this.providerByUser(userId);
     const completed = await this.prisma.job.findMany({
@@ -180,6 +270,66 @@ export class ProvidersService {
       totalPayoutCents: payouts._sum.amountCents ?? 0,
       ratingAvg: provider.ratingAvg,
       ratingCount: provider.ratingCount,
+    };
+  }
+
+  // ---- Instant payout to debit card (alongside the standard weekly schedule) ----
+
+  // Current balance on the provider's connected account, split into instant-eligible
+  // and standard buckets. Drives the "cash out" UI.
+  async payoutBalance(userId: string) {
+    const provider = await this.providerByUser(userId);
+    if (!provider.stripeAccountId || !this.stripe.enabled) {
+      return { instantAvailableCents: 0, availableCents: 0, pendingCents: 0, payoutsEnabled: false };
+    }
+    const status = await this.stripe.accountStatus(provider.stripeAccountId);
+    const balance = await this.stripe.connectBalance(provider.stripeAccountId);
+    return {
+      instantAvailableCents: balance?.instantAvailableCents ?? 0,
+      availableCents: balance?.availableCents ?? 0,
+      pendingCents: balance?.pendingCents ?? 0,
+      payoutsEnabled: !!status?.payoutsEnabled,
+    };
+  }
+
+  // Trigger an instant payout of the connected account's instant-available balance to
+  // the provider's debit card. Amount defaults to the full instant-available balance.
+  async instantPayout(userId: string, amountCents?: number) {
+    if (!this.stripe.enabled) throw new BadRequestException("Stripe is not configured");
+    const provider = await this.providerByUser(userId);
+    if (!provider.stripeAccountId) throw new BadRequestException("Connect payouts must be set up first");
+
+    const status = await this.stripe.accountStatus(provider.stripeAccountId);
+    if (!status?.payoutsEnabled) throw new BadRequestException("Payouts are not enabled on your Stripe account yet");
+
+    const balance = await this.stripe.connectBalance(provider.stripeAccountId);
+    const instantAvailable = balance?.instantAvailableCents ?? 0;
+    if (instantAvailable <= 0) throw new BadRequestException("No funds are available for instant payout right now");
+
+    const amount = amountCents ?? instantAvailable;
+    if (amount <= 0) throw new BadRequestException("Payout amount must be greater than zero");
+    if (amount > instantAvailable) {
+      throw new BadRequestException(`Amount exceeds instant-available balance (${instantAvailable} cents)`);
+    }
+
+    let payout;
+    try {
+      payout = await this.stripe.createInstantPayout(
+        provider.stripeAccountId,
+        amount,
+        { providerId: provider.id, kind: "instant_payout" },
+      );
+    } catch (e) {
+      // Surface Stripe's reason (e.g. no instant-eligible debit card on file).
+      throw new BadRequestException((e as Error).message || "Instant payout failed");
+    }
+
+    return {
+      payoutId: payout?.id ?? null,
+      amountCents: amount,
+      status: payout?.status ?? null,
+      method: "instant" as const,
+      arrivalDate: payout?.arrival_date ?? null,
     };
   }
 }

@@ -5,6 +5,9 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { PaymentsService } from "../payments/payments.service";
 import { StrikesService } from "../strikes/strikes.service";
 import { ProvidersService } from "../providers/providers.service";
+import { CheckrService } from "../providers/checkr.service";
+import { JobsService } from "../jobs/jobs.service";
+import { RatingsService } from "../ratings/ratings.service";
 import { StrikeReason } from "@prisma/client";
 
 @Injectable()
@@ -15,7 +18,36 @@ export class AdminService {
     private paymentsService: PaymentsService,
     private strikesService: StrikesService,
     private providersService: ProvidersService,
+    private checkrService: CheckrService,
+    private jobsService: JobsService,
+    private ratingsService: RatingsService,
   ) {}
+
+  // Admin-sent Stripe Connect onboarding link for a recruited provider (Sprint 5).
+  providerConnectLink(providerId: string) {
+    return this.providersService.adminConnectLink(providerId);
+  }
+
+  // Kick off a real Checkr background check (falls back to manual gate if Checkr unset).
+  checkrInitiate(providerId: string) {
+    return this.checkrService.initiateForProvider(providerId);
+  }
+
+  // Run the provider claim-and-no-show sweep on demand.
+  detectNoShows() {
+    return this.jobsService.detectProviderNoShows();
+  }
+
+  // ---- Manual rating adjustments (Sprint 5) ----
+  userRatings(userId: string) {
+    return this.ratingsService.listReceived(userId);
+  }
+  adjustRating(ratingId: string, data: { stars?: number; comment?: string }) {
+    return this.ratingsService.adminUpdate(ratingId, data);
+  }
+  removeRating(ratingId: string) {
+    return this.ratingsService.adminDelete(ratingId);
+  }
 
   refundPayment(paymentId: string, amountCents?: number) {
     return this.paymentsService.refundPayment(paymentId, amountCents);
@@ -191,7 +223,7 @@ export class AdminService {
     return this.prisma.user.findMany({
       where: { role: "CUSTOMER" },
       orderBy: { createdAt: "desc" },
-      select: { id: true, email: true, phone: true, fullName: true, isGuest: true, createdAt: true, _count: { select: { customerJobs: true } } },
+      select: { id: true, email: true, phone: true, fullName: true, isGuest: true, createdAt: true, suspendedUntil: true, suspendedReason: true, _count: { select: { customerJobs: true } } },
     });
   }
 

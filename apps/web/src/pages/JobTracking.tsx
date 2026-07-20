@@ -12,6 +12,8 @@ import type { Job, JobStatus } from "@/lib/types";
 import { dollars } from "@/lib/types";
 
 const IN_TRANSIT = new Set<JobStatus>(["EN_ROUTE", "ARRIVED", "IN_PROGRESS"]);
+// Chat opens once the job is in progress (brief: no contact until job in progress).
+const CHAT_OPEN = new Set<JobStatus>(["IN_PROGRESS", "COMPLETE"]);
 
 const STEPS: { key: JobStatus; label: string }[] = [
   { key: "AVAILABLE", label: "Finding a pro" },
@@ -22,10 +24,19 @@ const STEPS: { key: JobStatus; label: string }[] = [
   { key: "COMPLETE", label: "Complete" },
 ];
 
-const STEP_INDEX: Record<string, number> = {
-  AVAILABLE: 0, CLAIMED: 1, PENDING_APPROVAL: 1, APPROVED: 1, DECLINED: 1,
-  EN_ROUTE: 2, ARRIVED: 3, IN_PROGRESS: 4, COMPLETE: 5, CANCELLED: 0,
-};
+// The furthest lifecycle step actually reached, derived from timestamps so that the
+// transient add-on states (PENDING_APPROVAL / APPROVED / DECLINED) never make the
+// customer's progress bar jump backwards from where the job already got to.
+function reachedStep(job: Job): number {
+  if (job.completedAt) return 5;
+  if (job.startedAt || job.status === "IN_PROGRESS") return 4;
+  if (job.arrivedAt || job.status === "ARRIVED") return 3;
+  if (job.enRouteAt || job.status === "EN_ROUTE") return 2;
+  if (job.claimedAt || job.status === "CLAIMED") return 1;
+  // Add-on states can only occur after a pro is assigned → keep at least "Pro assigned".
+  if (["PENDING_APPROVAL", "APPROVED", "DECLINED"].includes(job.status)) return 1;
+  return 0;
+}
 
 export default function JobTracking() {
   const { jobId } = useParams() as { jobId: string };
@@ -44,14 +55,18 @@ export default function JobTracking() {
   });
 
   const [liveLoc, setLiveLoc] = useState<{ lat: number; lng: number; ts: number } | null>(null);
+  const [liveEta, setLiveEta] = useState<number | null>(null);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["job", jobId] });
   useSocketEvent("job.updated", (j: Job) => j.id === jobId && qc.setQueryData(["job", jobId], j));
   useSocketEvent("job.status_changed", invalidate);
   useSocketEvent("job.adjustment_requested", invalidate);
   useSocketEvent("job.completed", invalidate);
-  useSocketEvent("provider.location", (p: { jobId: string; lat: number; lng: number; ts: number }) => {
-    if (p.jobId === jobId) setLiveLoc({ lat: p.lat, lng: p.lng, ts: p.ts });
+  useSocketEvent("provider.location", (p: { jobId: string; lat: number; lng: number; etaMinutes?: number | null; ts: number }) => {
+    if (p.jobId === jobId) {
+      setLiveLoc({ lat: p.lat, lng: p.lng, ts: p.ts });
+      if (p.etaMinutes != null) setLiveEta(p.etaMinutes);
+    }
   });
 
   const approve = useMutation({
@@ -62,10 +77,42 @@ export default function JobTracking() {
     mutationFn: () => api(`/jobs/${jobId}/adjustments/decline`, { method: "POST" }),
     onSuccess: invalidate,
   });
+  const cancelJob = useMutation({
+    mutationFn: () => api(`/jobs/${jobId}/cancel`, { method: "POST" }),
+    onSuccess: invalidate,
+  });
+  const reportNoShow = useMutation({
+    mutationFn: () => api(`/jobs/${jobId}/provider-no-show`, { method: "POST" }),
+    onSuccess: invalidate,
+    onError: (e: any) => modal.alert("Couldn't report", e?.message || "Please try again."),
+  });
+  const onProviderNoShow = async () => {
+    if (
+      await modal.confirm({
+        title: "Report that your pro didn't show?",
+        body: "We'll cancel this job at no charge to you, and the pro will be penalized. Only do this if your pro never arrived.",
+        confirmLabel: "Report no-show",
+        cancelLabel: "Back",
+        destructive: true,
+      })
+    )
+      reportNoShow.mutate();
+  };
+  const onCancel = async () => {
+    if (!job) return;
+    const feeText =
+      job.status === "AVAILABLE"
+        ? "No pro is assigned yet — cancelling is free."
+        : IN_TRANSIT.has(job.status)
+          ? "Your pro is already on the way, so a 25% cancellation fee applies."
+          : "A $10 cancellation fee applies.";
+    if (await modal.confirm({ title: "Cancel this job?", body: feeText, confirmLabel: "Cancel job", cancelLabel: "Keep job" }))
+      cancelJob.mutate();
+  };
 
   if (!job) return <main className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">Loading…</main>;
 
-  const current = STEP_INDEX[job.status] ?? 0;
+  const current = reachedStep(job);
   const pending = job.addOns.filter((a) => a.status === "PENDING");
   const newTotal = job.basePriceCents + job.pendingAddOnsCents;
 
@@ -139,7 +186,8 @@ export default function JobTracking() {
                 lat={liveLoc?.lat ?? job.providerLat ?? null}
                 lng={liveLoc?.lng ?? job.providerLng ?? null}
                 lastUpdate={liveLoc?.ts ?? null}
-                etaMinutes={job.etaMinutes}
+                etaMinutes={liveEta ?? job.etaMinutes}
+                vehicleType={job.vehicleType}
               />
             )}
 
@@ -187,7 +235,19 @@ export default function JobTracking() {
                 <span className="text-2xl font-bold tracking-tight text-primary">{dollars(job.customerTotalCents)}</span>
               </div>
               {job.providerName && (
-                <p className="mt-3 text-xs text-muted-foreground">Your pro: {job.providerName}</p>
+                <div className="mt-3 flex items-center gap-2.5 border-t border-border pt-3">
+                  {job.providerPhotoUrl ? (
+                    <img src={job.providerPhotoUrl} alt={job.providerName} className="h-9 w-9 shrink-0 rounded-full object-cover" />
+                  ) : (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-muted-foreground">
+                      {job.providerName.trim().charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">Your pro: {job.providerName}</div>
+                    {job.vehicleType && <div className="text-xs text-muted-foreground">{job.vehicleType}</div>}
+                  </div>
+                </div>
               )}
             </section>
 
@@ -212,7 +272,13 @@ export default function JobTracking() {
               </section>
             )}
 
-            {job.status !== "AVAILABLE" && <JobChat jobId={jobId} />}
+            {CHAT_OPEN.has(job.status) ? (
+              <JobChat jobId={jobId} />
+            ) : job.status !== "AVAILABLE" ? (
+              <p className="mt-6 rounded-3xl border border-dashed border-border bg-card/50 p-5 text-center text-xs text-muted-foreground">
+                Messaging with your pro opens once the job is in progress.
+              </p>
+            ) : null}
 
             {job.status === "COMPLETE" && (
               <Link
@@ -223,12 +289,33 @@ export default function JobTracking() {
               </Link>
             )}
 
+            {/* Claim-and-no-show: assigned pro never arrived (Sprint 4, item 3). */}
+            {(job.status === "CLAIMED" || job.status === "EN_ROUTE") && (
+              <button
+                onClick={onProviderNoShow}
+                disabled={reportNoShow.isPending}
+                className="mt-4 flex h-11 w-full items-center justify-center rounded-2xl border border-amber-500/40 bg-amber-500/5 text-sm font-semibold text-amber-600 transition hover:bg-amber-500/10 disabled:opacity-60"
+              >
+                {reportNoShow.isPending ? "Reporting…" : "My pro didn't show up"}
+              </button>
+            )}
+
             {job.status !== "AVAILABLE" && (
               <div className="mt-4 text-center">
                 <Link to={`/job/${jobId}/report`} className="text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-destructive">
                   Report an issue with this job
                 </Link>
               </div>
+            )}
+
+            {job.status !== "COMPLETE" && (
+              <button
+                onClick={onCancel}
+                disabled={cancelJob.isPending}
+                className="mt-4 flex h-11 w-full items-center justify-center rounded-2xl border border-destructive/30 bg-background text-sm font-semibold text-destructive transition hover:bg-destructive/5 disabled:opacity-60"
+              >
+                {cancelJob.isPending ? "Cancelling…" : "Cancel this job"}
+              </button>
             )}
           </>
         )}

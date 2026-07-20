@@ -4,8 +4,11 @@ export interface AuthUserDto {
   id: string;
   email: string | null;
   phone: string | null;
+  phoneVerified?: boolean;
+  smsOptIn?: boolean;
   role: Role;
   fullName: string | null;
+  profilePhotoUrl: string | null;
   isGuest: boolean;
 }
 
@@ -84,14 +87,32 @@ export interface Job {
   providerPayoutCents: number;
   providerName: string | null;
   providerId: string | null;
+  providerPhotoUrl: string | null;
+  vehicleType: string | null;
   customerId: string | null;
+  customerName: string | null;
+  customerPhotoUrl: string | null;
+  customerRatingAvg: number;
+  customerRatingCount: number;
   providerLat: number | null;
   providerLng: number | null;
   etaMinutes: number | null;
   photos: { id: string; kind: "BEFORE" | "AFTER"; url: string; takenAt: string }[];
   createdAt: string;
   claimedAt: string | null;
+  enRouteAt: string | null;
+  arrivedAt: string | null;
+  startedAt: string | null;
   completedAt: string | null;
+  cancelledAt: string | null;
+}
+
+// A provider's completed job, with two-way rating status (Sprint 4, item 2).
+export interface CompletedJob extends Job {
+  providerRatedCustomer: boolean;
+  providerGaveStars: number | null;
+  customerRatedProvider: boolean;
+  customerGaveStars: number | null;
 }
 
 export interface JobCard {
@@ -105,6 +126,8 @@ export interface JobCard {
   providerPayoutCents: number;
   serviceAddress: string | null;
   status: JobStatus;
+  customerRatingAvg: number;
+  customerRatingCount: number;
   createdAt: string;
 }
 

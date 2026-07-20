@@ -251,9 +251,12 @@ export default function Index() {
               Log out{user.email ? ` (${user.email})` : ""}
             </button>
           ) : (
-            <div className="flex items-center justify-center gap-5">
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
               <Link to="/login" className="text-xs font-medium text-muted-foreground underline underline-offset-4 transition hover:text-foreground">
                 Customer log in
+              </Link>
+              <Link to="/signup" className="text-xs font-medium text-muted-foreground underline underline-offset-4 transition hover:text-foreground">
+                Sign up
               </Link>
               <Link to="/provider/login" className="text-xs font-medium text-muted-foreground underline underline-offset-4 transition hover:text-foreground">
                 Provider login

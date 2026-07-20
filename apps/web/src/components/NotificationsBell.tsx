@@ -25,7 +25,9 @@ export default function NotificationsBell() {
     refetchInterval: 20000,
   });
 
-  // Any realtime event likely produced a notification — refetch.
+  // Real-time push: the server emits `notification.new` to the user's room the moment
+  // a notification is created. `job.updated` is kept as a secondary trigger.
+  useSocketEvent("notification.new", () => qc.invalidateQueries({ queryKey: ["notifications"] }));
   useSocketEvent("job.updated", () => qc.invalidateQueries({ queryKey: ["notifications"] }));
 
   const markAll = useMutation({

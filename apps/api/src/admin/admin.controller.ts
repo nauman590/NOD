@@ -1,7 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { IsInt, IsOptional, IsString, Max, Min } from "class-validator";
 import { ProviderStatus, Role } from "@prisma/client";
 import { AdminService } from "./admin.service";
 import { Roles } from "../common/decorators";
+
+class AdjustRatingDto {
+  @IsOptional() @IsInt() @Min(1) @Max(5) stars?: number;
+  @IsOptional() @IsString() comment?: string;
+}
 
 @Roles(Role.ADMIN)
 @Controller("admin")
@@ -11,6 +17,12 @@ export class AdminController {
   @Get("metrics")
   metrics() {
     return this.admin.metrics();
+  }
+
+  // Detect providers who claimed a job and never showed (past the grace window).
+  @Post("no-shows/sweep")
+  detectNoShows() {
+    return this.admin.detectNoShows();
   }
 
   @Get("analytics")
@@ -53,6 +65,22 @@ export class AdminController {
     return this.admin.removeStrike(id);
   }
 
+  // ---- Manual rating adjustments ----
+  @Get("users/:id/ratings")
+  userRatings(@Param("id") id: string) {
+    return this.admin.userRatings(id);
+  }
+
+  @Patch("ratings/:id")
+  adjustRating(@Param("id") id: string, @Body() dto: AdjustRatingDto) {
+    return this.admin.adjustRating(id, dto);
+  }
+
+  @Delete("ratings/:id")
+  removeRating(@Param("id") id: string) {
+    return this.admin.removeRating(id);
+  }
+
   @Get("providers")
   providers(@Query("status") status?: ProviderStatus) {
     return this.admin.providers(status);
@@ -76,6 +104,18 @@ export class AdminController {
   @Post("providers/:id/deactivate")
   deactivate(@Param("id") id: string) {
     return this.admin.deactivate(id);
+  }
+
+  // Generate a Stripe Connect onboarding link an admin can send to a recruited provider.
+  @Post("providers/:id/connect-link")
+  connectLink(@Param("id") id: string) {
+    return this.admin.providerConnectLink(id);
+  }
+
+  // Kick off a Checkr background check for a provider (falls back to manual gate if unset).
+  @Post("providers/:id/checkr/initiate")
+  checkrInitiate(@Param("id") id: string) {
+    return this.admin.checkrInitiate(id);
   }
 
   @Get("customers")

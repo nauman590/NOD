@@ -62,6 +62,12 @@ export default function ProviderLogin() {
             />
           </label>
 
+          <div className="text-right">
+            <Link to="/forgot-password?kind=provider" className="text-sm font-medium text-primary hover:underline underline-offset-4">
+              Forgot password?
+            </Link>
+          </div>
+
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <button

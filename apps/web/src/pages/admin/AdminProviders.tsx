@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useModal, Modal } from "@/components/ui/Modal";
+import AdminRatingsModal from "@/components/AdminRatingsModal";
 import { dollars2 } from "@/lib/types";
 
 interface Strike {
@@ -19,8 +20,9 @@ interface ProviderRow {
   ratingAvg: number;
   ratingCount: number;
   depositStatus: string | null;
+  depositBalanceCents: number | null;
   backgroundCheckStatus: string | null;
-  user: { fullName: string | null; email: string | null; phone: string | null };
+  user: { id: string; fullName: string | null; email: string | null; phone: string | null };
   categoryRates: { hourlyRateCents: number; category: { name: string } }[];
   strikes: Strike[];
 }
@@ -44,6 +46,7 @@ export default function AdminProviders() {
   const { data: providers = [] } = useQuery({ queryKey: ["admin", "providers"], queryFn: () => api<ProviderRow[]>("/admin/providers") });
 
   const [strikeFor, setStrikeFor] = useState<ProviderRow | null>(null);
+  const [ratingsFor, setRatingsFor] = useState<{ userId: string; name: string } | null>(null);
   const [reason, setReason] = useState("OTHER");
   const [fee, setFee] = useState(20);
   const [note, setNote] = useState("");
@@ -58,6 +61,26 @@ export default function AdminProviders() {
     mutationFn: ({ id, result }: { id: string; result: "PASSED" | "FAILED" }) =>
       api(`/admin/providers/${id}/background`, { method: "POST", body: { result } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+
+  // Generate a Stripe Connect onboarding link an admin can send to a recruited provider.
+  const connectLink = useMutation({
+    mutationFn: (id: string) => api<{ url: string }>(`/admin/providers/${id}/connect-link`, { method: "POST" }),
+  });
+  const sendConnectLink = async (id: string) => {
+    try {
+      const r = await connectLink.mutateAsync(id);
+      if (r?.url) await modal.alert("Connect onboarding link", `Send this link to the provider to finish Stripe onboarding:\n\n${r.url}`);
+    } catch (e: any) {
+      await modal.alert("Couldn't create link", e?.message || "Stripe may not be configured.");
+    }
+  };
+
+  // Kick off a Checkr background check (falls back to the manual gate if Checkr is unset).
+  const checkr = useMutation({
+    mutationFn: (id: string) => api(`/admin/providers/${id}/checkr/initiate`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+    onError: (e: any) => modal.alert("Checkr", e?.message || "Checkr isn't configured — use the manual Pass/Fail gate."),
   });
 
   const issueStrike = useMutation({
@@ -78,10 +101,10 @@ export default function AdminProviders() {
   return (
     <div>
       <h1 className="text-2xl font-bold tracking-tight">Providers</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Approve, suspend, or deactivate providers (Checkr is stubbed — approve manually).</p>
+      <p className="mt-1 text-sm text-muted-foreground">Approve, suspend, or deactivate providers. Run Checkr (when configured) or pass the check manually before activation.</p>
 
-      <div className="mt-6 overflow-hidden rounded-2xl border border-border">
-        <table className="w-full text-sm">
+      <div className="mt-6 overflow-x-auto rounded-2xl border border-border">
+        <table className="w-full min-w-[900px] text-sm">
           <thead className="bg-card text-left text-xs uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="px-4 py-3">Name</th>
@@ -109,7 +132,15 @@ export default function AdminProviders() {
                 <td className="px-4 py-3 text-xs text-muted-foreground">
                   {p.categoryRates.map((r) => `${r.category.name} ${dollars2(r.hourlyRateCents)}/h`).join(", ") || "—"}
                 </td>
-                <td className="px-4 py-3">{p.ratingCount ? `${p.ratingAvg.toFixed(1)}★ (${p.ratingCount})` : "—"}</td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => setRatingsFor({ userId: p.user.id, name: p.user.fullName ?? p.user.email ?? "Provider" })}
+                    title="Adjust ratings"
+                    className="rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
+                  >
+                    {p.ratingCount ? `${p.ratingAvg.toFixed(1)}★ (${p.ratingCount})` : "—"} <span className="text-muted-foreground">✎</span>
+                  </button>
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     <span className="font-semibold">{p.strikes.length}</span>
@@ -121,13 +152,14 @@ export default function AdminProviders() {
                     ))}
                   </div>
                   <div className="mt-1 flex gap-2 text-[10px] text-muted-foreground">
-                    <span>{p.depositStatus === "CAPTURED" ? "deposit ✓" : "no deposit"}</span>
+                    <span>{p.depositStatus === "CAPTURED" ? `deposit ${dollars2(p.depositBalanceCents ?? 0)}` : "no deposit"}</span>
                     <span>{bgLabel(p.backgroundCheckStatus)}</span>
                   </div>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap justify-end gap-2">
                     <button onClick={() => setStrikeFor(p)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-amber-600">Strike</button>
+                    <button onClick={() => sendConnectLink(p.id)} disabled={connectLink.isPending} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Connect link</button>
                     {p.status === "ACTIVE" ? (
                       <>
                         <button onClick={() => confirmAct(p.id, "suspend", "Suspend")} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">Suspend</button>
@@ -137,6 +169,7 @@ export default function AdminProviders() {
                       <>
                         {!bgPassed(p.backgroundCheckStatus) && (
                           <>
+                            <button onClick={() => checkr.mutate(p.id)} disabled={checkr.isPending} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">Run Checkr</button>
                             <button onClick={() => bgCheck.mutate({ id: p.id, result: "PASSED" })} className="rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary">Pass check</button>
                             <button onClick={() => bgCheck.mutate({ id: p.id, result: "FAILED" })} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-destructive">Fail check</button>
                           </>
@@ -199,6 +232,8 @@ export default function AdminProviders() {
           </>
         )}
       </Modal>
+
+      <AdminRatingsModal userId={ratingsFor?.userId ?? null} name={ratingsFor?.name ?? ""} onClose={() => setRatingsFor(null)} />
     </div>
   );
 }

@@ -48,4 +48,14 @@ export class ProvidersController {
   collectDeposit(@CurrentUser() user: AuthUser, @Body() body: { paymentMethodId?: string }) {
     return this.providers.collectDeposit(user.id, body?.paymentMethodId);
   }
+
+  @Get("me/payouts/balance")
+  payoutBalance(@CurrentUser() user: AuthUser) {
+    return this.providers.payoutBalance(user.id);
+  }
+
+  @Post("me/payouts/instant")
+  instantPayout(@CurrentUser() user: AuthUser, @Body() body: { amountCents?: number }) {
+    return this.providers.instantPayout(user.id, body?.amountCents);
+  }
 }

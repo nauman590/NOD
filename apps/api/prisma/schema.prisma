@@ -47,8 +47,10 @@ enum PaymentType {
   CANCELLATION_FEE
   PROVIDER_STRIKE
   PROVIDER_DEPOSIT
+  DEPOSIT_DEDUCTION
   PAYOUT
   REFUND
+  DISPUTE_CHARGE
 }
 
 enum PaymentStatus {
@@ -110,10 +112,27 @@ model User {
   email         String?  @unique
   phone         String?  @unique
   phoneVerified Boolean  @default(false)
+  // SMS opt-in (brief: defaults to checked, toggleable later). Twilio SMS is only sent
+  // when this is true AND a phone is on file; IN_APP notifications always record.
+  smsOptIn      Boolean  @default(true)
+  // Phone verification OTP (hashed) + expiry. Set by /auth/phone/request-otp, cleared on verify.
+  phoneOtpHash      String?
+  phoneOtpExpiresAt DateTime?
   passwordHash  String?
   role          Role     @default(CUSTOMER)
   fullName      String?
+  profilePhotoUrl String?
   isGuest       Boolean  @default(false)
+  // Stripe Customer + the card saved at checkout (setup_future_usage=off_session), so
+  // later off-session charges (add-ons, cancellation fees, dispute charges) can bill the
+  // customer's real card instead of the test-mode default. Populated on first paid checkout.
+  stripeCustomerId      String?
+  stripePaymentMethodId String?
+  // Aggregate of the ratings this user received AS A CUSTOMER (providers keep their
+  // own aggregate on Provider). Lets a provider see a customer's reputation before
+  // accepting the next job.
+  customerRatingAvg   Float @default(0)
+  customerRatingCount Int   @default(0)
   suspendedUntil DateTime?
   suspendedReason String?
   createdAt     DateTime @default(now())
@@ -122,12 +141,16 @@ model User {
   provider      Provider?
   customerJobs  Job[]          @relation("CustomerJobs")
   sessions      Session[]
+  passwordResetTokens PasswordResetToken[]
   ratingsGiven  Rating[]       @relation("RatingsGiven")
   ratingsGot    Rating[]       @relation("RatingsReceived")
   notifications Notification[]
   disputes      Dispute[]      @relation("DisputeRaisedBy")
+  disputePhotos DisputePhoto[] @relation("DisputePhotoUploader")
   payments      Payment[]
   messages      Message[]      @relation("MessageSender")
+  offPlatformReportsMade    OffPlatformReport[] @relation("OffPlatformReporter")
+  offPlatformReportsAgainst OffPlatformReport[] @relation("OffPlatformReported")
 
   @@index([role])
 }
@@ -157,11 +180,21 @@ model Provider {
   profilePhotoUrl       String?
   bio                   String?
   stripeAccountId       String?
+  stripeCustomerId      String?
   depositSetupId        String?
   depositPaymentIntentId String?
   depositRefundedAt     DateTime?
   depositStatus         PaymentStatus?
+  // Live held-deposit balance in cents (set when the deposit is captured; drawn down as
+  // strike fees / dispute claw-backs are settled from it; refunded amount on exit). Null
+  // = no deposit ever collected.
+  depositBalanceCents   Int?
+  // Background check. Without a Checkr key this is a manual admin gate (STUB_PENDING →
+  // PASSED/FAILED). With CHECKR_API_KEY set, checkrCandidateId/checkrReportId are
+  // populated and the status is driven by Checkr report webhooks.
   backgroundCheckStatus String?        @default("STUB_PENDING")
+  checkrCandidateId     String?
+  checkrReportId        String?
   approvedAt            DateTime?
   approvedById          String?
   ratingAvg             Float          @default(0)
@@ -174,6 +207,7 @@ model Provider {
   claimedJobs   Job[]                  @relation("ProviderJobs")
   strikes       Strike[]
   adjustments   Adjustment[]
+  clawbacks     DisputeClawback[]
 
   @@index([status])
 }
@@ -265,7 +299,8 @@ model Job {
 
   providerLat      Float?
   providerLng      Float?
-  etaMinutes       Int?
+  etaMinutes       Int?      // live ETA, recomputed on every GPS ping (drives the map)
+  dispatchEtaMinutes Int?    // ETA frozen at trip start — the baseline for late-arrival penalty
 
   claimedAt        DateTime?
   enRouteAt        DateTime?
@@ -288,6 +323,7 @@ model Job {
   notifications Notification[]
   messages      Message[]
   photos        JobPhoto[]
+  offPlatformReports OffPlatformReport[]
 
   @@index([status])
   @@index([categoryId, status])
@@ -400,8 +436,40 @@ model Dispute {
   resolvedAt   DateTime?
   createdAt    DateTime      @default(now())
 
+  photos       DisputePhoto[]
+  clawbacks    DisputeClawback[]
+
   @@index([status])
   @@index([jobId])
+}
+
+// Evidence photos on a dispute. Either party (customer or provider) can attach them.
+model DisputePhoto {
+  id         String   @id @default(cuid())
+  disputeId  String
+  dispute    Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  uploaderId String
+  uploader   User     @relation("DisputePhotoUploader", fields: [uploaderId], references: [id])
+  url        String
+  createdAt  DateTime @default(now())
+
+  @@index([disputeId])
+}
+
+// A ledger claw-back: when a dispute on an ALREADY-PAID-OUT job resolves to a refund,
+// the refunded amount is recovered from the provider's next payout(s) — no Stripe
+// transfer reversal. Mirrors the strike-fee settlement model.
+model DisputeClawback {
+  id          String    @id @default(cuid())
+  disputeId   String
+  dispute     Dispute   @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  providerId  String
+  provider    Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  amountCents Int
+  settledAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([providerId, settledAt])
 }
 
 enum JobPhotoKind {
@@ -433,4 +501,46 @@ model JobPhoto {
   takenAt   DateTime     @default(now())
 
   @@index([jobId])
+}
+
+enum OffPlatformReportStatus {
+  PENDING
+  VERIFIED
+  DISMISSED
+}
+
+// A report that a job counterparty solicited an off-platform (cash / Venmo / etc.)
+// payment. Reviewed by an admin; VERIFIED → the reported user is immediately banned.
+model OffPlatformReport {
+  id             String                  @id @default(cuid())
+  jobId          String?
+  job            Job?                    @relation(fields: [jobId], references: [id])
+  reporterId     String
+  reporter       User                    @relation("OffPlatformReporter", fields: [reporterId], references: [id])
+  reportedUserId String
+  reportedUser   User                    @relation("OffPlatformReported", fields: [reportedUserId], references: [id])
+  description    String
+  evidenceUrl    String?
+  status         OffPlatformReportStatus @default(PENDING)
+  reviewedById   String?
+  reviewedAt     DateTime?
+  banApplied     Boolean                 @default(false)
+  createdAt      DateTime                @default(now())
+
+  @@index([status])
+  @@index([reportedUserId])
+}
+
+// Single-use, time-limited tokens for the password-reset flow. Only the SHA-256
+// hash of the token is stored; the raw token lives only in the reset link.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }

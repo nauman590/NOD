@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Bell, ChevronRight, MapPin } from "lucide-react";
+import { ArrowLeft, Bell, ChevronRight, MapPin, UserCircle } from "lucide-react";
 import { api, getAccessToken } from "@/lib/api";
 import NotificationsBell from "@/components/NotificationsBell";
 import type { Job } from "@/lib/types";
@@ -41,7 +41,14 @@ export default function MyJobs() {
           <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Home
           </Link>
-          {signedIn && <NotificationsBell />}
+          {signedIn && (
+            <div className="flex items-center gap-2">
+              <NotificationsBell />
+              <Link to="/account" aria-label="Account" className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background transition hover:bg-muted">
+                <UserCircle className="h-4 w-4" />
+              </Link>
+            </div>
+          )}
         </div>
 
         <h1 className="mt-5 text-3xl font-bold tracking-tight">My jobs</h1>

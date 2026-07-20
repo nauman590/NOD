@@ -2,10 +2,20 @@ import { Controller, Post, UploadedFile, UseInterceptors, BadRequestException } 
 import { FileInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import { randomUUID } from "crypto";
-import { extname } from "path";
 import { Public } from "../common/decorators";
 
 export const UPLOADS_DIR = process.cwd() + "/uploads";
+
+// Allowed types → the extension we control. The stored filename NEVER derives from
+// the client-supplied originalname (which could be `x.html` and be served as HTML,
+// enabling stored XSS). We only ever write a safe, server-chosen extension.
+const ALLOWED_TYPES: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/heic": ".heic",
+  "application/pdf": ".pdf",
+};
 
 @Controller("uploads")
 export class UploadsController {
@@ -16,11 +26,11 @@ export class UploadsController {
     FileInterceptor("file", {
       storage: diskStorage({
         destination: UPLOADS_DIR,
-        filename: (_req, file, cb) => cb(null, `${randomUUID()}${extname(file.originalname) || ".jpg"}`),
+        filename: (_req, file, cb) => cb(null, `${randomUUID()}${ALLOWED_TYPES[file.mimetype] ?? ".bin"}`),
       }),
       limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
       fileFilter: (_req, file, cb) => {
-        const ok = ["image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf"].includes(file.mimetype);
+        const ok = Object.prototype.hasOwnProperty.call(ALLOWED_TYPES, file.mimetype);
         cb(ok ? null : new BadRequestException("unsupported file type"), ok);
       },
     }),

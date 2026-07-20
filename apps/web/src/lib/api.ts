@@ -24,19 +24,83 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
+export function getRefreshToken(): string | null {
+  return localStorage.getItem("nod_refresh");
+}
+
+export function setRefreshToken(token: string | null) {
+  if (token) localStorage.setItem("nod_refresh", token);
+  else localStorage.removeItem("nod_refresh");
+}
+
+// Called when the refresh token is gone/invalid so the app drops to a logged-out state.
+let onAuthCleared: (() => void) | null = null;
+export function setOnAuthCleared(fn: (() => void) | null) {
+  onAuthCleared = fn;
+}
+function clearAuth() {
+  setAccessToken(null);
+  setRefreshToken(null);
+  onAuthCleared?.();
+}
+
+// Single-flight refresh: many concurrent 401s share one /auth/refresh round-trip.
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function refreshAccessToken(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return false;
+    try {
+      const res = await fetch(API_BASE + "/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) {
+        // Refresh token expired/revoked → hard logout.
+        if (res.status === 401 || res.status === 400) clearAuth();
+        return false;
+      }
+      const data = await res.json();
+      setAccessToken(data.accessToken);
+      // The server rotates the refresh token on every refresh — persist the new one.
+      if (data.refreshToken) setRefreshToken(data.refreshToken);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+async function doFetch(path: string, method: string, body: unknown, token: string | null) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return fetch(API_BASE + path, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+const AUTH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh"];
+
 export async function api<T = any>(
   path: string,
   opts: { method?: string; body?: unknown; auth?: boolean } = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const token = getAccessToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const method = opts.method || "GET";
+  let res = await doFetch(path, method, opts.body, getAccessToken());
 
-  const res = await fetch(API_BASE + path, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
+  // Access token likely expired — transparently refresh once and retry.
+  if (res.status === 401 && !AUTH_PATHS.some((p) => path.startsWith(p)) && getRefreshToken()) {
+    const ok = await refreshAccessToken();
+    if (ok) res = await doFetch(path, method, opts.body, getAccessToken());
+  }
 
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
@@ -46,12 +110,18 @@ export async function api<T = any>(
 
 // Multipart file upload → returns the served URL.
 export async function uploadFile(file: File): Promise<{ url: string }> {
-  const form = new FormData();
-  form.append("file", file);
-  const headers: Record<string, string> = {};
-  const token = getAccessToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(API_BASE + "/uploads", { method: "POST", headers, body: form });
+  const send = (token: string | null) => {
+    const form = new FormData();
+    form.append("file", file);
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return fetch(API_BASE + "/uploads", { method: "POST", headers, body: form });
+  };
+  let res = await send(getAccessToken());
+  if (res.status === 401 && getRefreshToken()) {
+    const ok = await refreshAccessToken();
+    if (ok) res = await send(getAccessToken());
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) throw new ApiError(res.status, data);

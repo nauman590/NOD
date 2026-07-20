@@ -16,6 +16,7 @@ import { RealtimeModule } from "./realtime/realtime.module";
 import { RatingsModule } from "./ratings/ratings.module";
 import { AdminModule } from "./admin/admin.module";
 import { DisputesModule } from "./disputes/disputes.module";
+import { OffPlatformModule } from "./off-platform/off-platform.module";
 import { UploadsModule } from "./uploads/uploads.module";
 import { MapsModule } from "./maps/maps.module";
 import { MessagesModule } from "./messages/messages.module";
@@ -38,6 +39,7 @@ import { MessagesModule } from "./messages/messages.module";
     RatingsModule,
     AdminModule,
     DisputesModule,
+    OffPlatformModule,
   ],
   controllers: [AppController],
   providers: [

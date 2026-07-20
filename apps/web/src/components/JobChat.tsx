@@ -13,7 +13,8 @@ interface Message {
   sender: { id: string; fullName: string | null; role: string };
 }
 
-// Shared customer↔provider chat for a job. Opens once a provider is assigned.
+// Shared customer↔provider chat for a job. Opens once the job is in progress
+// (server gates sending; callers should only mount this when chat is open).
 export default function JobChat({ jobId }: { jobId: string }) {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -32,7 +33,7 @@ export default function JobChat({ jobId }: { jobId: string }) {
   });
 
   useSocketEvent("message.new", (m: Message) => {
-    if ((m as any).jobId === jobId || true) qc.invalidateQueries({ queryKey: ["messages", jobId] });
+    if ((m as any).jobId === jobId) qc.invalidateQueries({ queryKey: ["messages", jobId] });
   });
 
   useEffect(() => {

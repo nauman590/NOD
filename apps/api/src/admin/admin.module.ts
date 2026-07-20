@@ -5,9 +5,11 @@ import { NotificationsModule } from "../notifications/notifications.module";
 import { PaymentsModule } from "../payments/payments.module";
 import { StrikesModule } from "../strikes/strikes.module";
 import { ProvidersModule } from "../providers/providers.module";
+import { JobsModule } from "../jobs/jobs.module";
+import { RatingsModule } from "../ratings/ratings.module";
 
 @Module({
-  imports: [NotificationsModule, PaymentsModule, StrikesModule, ProvidersModule],
+  imports: [NotificationsModule, PaymentsModule, StrikesModule, ProvidersModule, JobsModule, RatingsModule],
   providers: [AdminService],
   controllers: [AdminController],
 })
