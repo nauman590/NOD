@@ -37,6 +37,10 @@ export interface EstimateBreakdown {
   avgRateCents: number;
   rateSource: "market" | "fallback";
   laborCents: number;
+  volumeCubicYards: number;
+  volumeCents: number;
+  poolDistanceMiles: number;
+  tripCents: number;
   mileageCents: number;
   baseFeeCents: number;
   disposalFeeCents: number;

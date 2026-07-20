@@ -50,6 +50,13 @@ export class RatingsService {
 
     const rateeId = isCustomer ? job.provider!.userId : job.customerId;
 
+    // Capture the prior rating (if any) BEFORE the upsert so we can tell whether this
+    // POST actually changed anything. A rating is unique per (job, rater), so repeated
+    // POSTs just update the same row and must not re-trigger penalties.
+    const existing = await this.prisma.rating.findUnique({
+      where: { jobId_raterId: { jobId, raterId: raterUserId } },
+    });
+
     const rating = await this.prisma.rating.upsert({
       where: { jobId_raterId: { jobId, raterId: raterUserId } },
       update: { stars, comment: comment ?? null, rateeId },
@@ -58,15 +65,35 @@ export class RatingsService {
 
     const agg = await this.recomputeAggregateFor(rateeId);
 
+    // Only a changed rating can move a provider's standing — a repeated identical POST
+    // (same stars) must not stack strikes/suspensions and grind a provider to deactivation.
+    const ratingChanged = !existing || existing.stars !== stars;
+
     // Quality thresholds on a provider's rolling 30-day average (need ≥3 ratings):
     // < 3.5 → suspend + strike; otherwise < 4.0 → warning notification only.
-    if (isCustomer && job.provider && agg?.isProvider && agg.count >= 3) {
+    if (isCustomer && job.provider && agg?.isProvider && agg.count >= 3 && ratingChanged) {
       if (agg.avg < 3.5) {
-        await this.strikes.issue(job.provider.id, "LOW_RATING", { note: `Rolling 30-day rating ${agg.avg.toFixed(2)} below 3.5` });
-        await this.prisma.provider.update({
-          where: { id: job.provider.id },
-          data: { status: "SUSPENDED", suspendedUntil: new Date(Date.now() + 7 * 86400000) },
+        // At most ONE low-rating strike per job, so a single customer can't repeatedly
+        // re-rate the same job to pile on strikes. Suspension + strike happen together and
+        // only on the first sub-3.5 crossing for this job.
+        const priorStrike = await this.prisma.strike.findFirst({
+          where: { providerId: job.provider.id, jobId, reason: "LOW_RATING" },
         });
+        if (!priorStrike) {
+          await this.strikes.issue(job.provider.id, "LOW_RATING", { jobId, note: `Rolling 30-day rating ${agg.avg.toFixed(2)} below 3.5` });
+          // strikes.issue may itself DEACTIVATE (5th strike / 90d). Never downgrade a
+          // deactivation back to a 7-day suspension — re-read the current status first.
+          const after = await this.prisma.provider.findUnique({
+            where: { id: job.provider.id },
+            select: { status: true },
+          });
+          if (after && after.status !== "DEACTIVATED") {
+            await this.prisma.provider.update({
+              where: { id: job.provider.id },
+              data: { status: "SUSPENDED", suspendedUntil: new Date(Date.now() + 7 * 86400000) },
+            });
+          }
+        }
       } else if (agg.avg < 4.0) {
         await this.notifications.notify({
           userId: job.provider.userId,

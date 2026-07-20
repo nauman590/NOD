@@ -160,11 +160,16 @@ export class ProvidersService {
     if (!provider) throw new NotFoundException("provider not found");
     if (provider.depositStatus !== PaymentStatus.CAPTURED || !provider.depositPaymentIntentId) return { refunded: false };
     const refundCents = provider.depositBalanceCents ?? 0;
+    // Only flip the deposit to REFUNDED once the money has actually moved. If the Stripe
+    // refund throws we must NOT mark it refunded: the DB would claim the $50 was returned
+    // while the funds are still held, and the CAPTURED guard above blocks any retry — the
+    // provider would lose the deposit permanently. Surface the failure so the caller (admin
+    // deactivate / manual refund) can retry once the underlying issue is resolved.
     if (this.stripe.enabled && refundCents > 0) {
       try {
         await this.stripe.refund(provider.depositPaymentIntentId, refundCents);
-      } catch {
-        /* leave status if refund fails */
+      } catch (e) {
+        throw new BadRequestException(`Deposit refund failed; deposit left CAPTURED for retry: ${(e as Error).message}`);
       }
     }
     await this.prisma.provider.update({

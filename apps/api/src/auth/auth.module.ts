@@ -6,6 +6,7 @@ import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "./jwt.strategy";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { getAccessSecret } from "../common/jwt-secret";
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { NotificationsModule } from "../notifications/notifications.module";
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>("JWT_ACCESS_SECRET") || "dev_access_secret_change_me",
+        secret: getAccessSecret(config),
       }),
     }),
   ],

@@ -43,6 +43,14 @@ export class PaymentsController {
       throw new BadRequestException("invalid signature");
     }
     if (!parsed) return { ignored: true };
+    // constructEvent returns verified:false only when STRIPE_WEBHOOK_SECRET is unset. An
+    // unverified event can be forged by anyone who can reach this endpoint, and the handler
+    // mutates payment state (CAPTURED / REFUNDED / FAILED) — never process one. In prod the
+    // StripeService boot guard requires the secret, so this path can only occur in local dev.
+    if (!parsed.verified) {
+      this.logger.warn("Rejecting unverified Stripe webhook — STRIPE_WEBHOOK_SECRET is not configured.");
+      throw new BadRequestException("webhook signature verification is not configured");
+    }
     return this.payments.handleWebhook(parsed.event);
   }
 

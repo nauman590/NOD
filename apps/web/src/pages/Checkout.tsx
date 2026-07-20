@@ -7,7 +7,7 @@ import { getStripe } from "@/lib/stripe";
 import { useAuth } from "@/lib/auth";
 import { useModal } from "@/components/ui/Modal";
 import type { EstimateResult, Job } from "@/lib/types";
-import { dollars } from "@/lib/types";
+import { dollars2 } from "@/lib/types";
 
 interface TaskDraft {
   photoUrl: string | null;
@@ -99,7 +99,7 @@ export default function Checkout() {
           </div>
           <div className="mt-4 flex items-baseline justify-between border-t border-border pt-4">
             <span className="text-sm text-muted-foreground">Total</span>
-            <span className="text-3xl font-bold tracking-tight">{dollars(estimate.basePriceCents)}</span>
+            <span className="text-3xl font-bold tracking-tight">{dollars2(estimate.basePriceCents)}</span>
           </div>
           <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             <Lock className="h-3 w-3" /> Price locked · secure checkout
@@ -168,7 +168,7 @@ function useCheckout(estimate: EstimateResult, addressText: string) {
     }
   };
 
-  return { user, signedInCustomer, paying, book, modal };
+  return { user, signedInCustomer, paying, setPaying, book, modal };
 }
 
 // The account fields + name + card slot + pay bar. Card capture is injected so the
@@ -186,7 +186,7 @@ function PaymentShell({
   cardValid: boolean;
   getPaymentMethodId: (name: string) => Promise<string | undefined>;
 }) {
-  const { user, signedInCustomer, paying, book, modal } = useCheckout(estimate, addressText);
+  const { user, signedInCustomer, paying, setPaying, book, modal } = useCheckout(estimate, addressText);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -197,10 +197,16 @@ function PaymentShell({
   const valid = name.trim().length > 1 && cardValid && accountReady;
 
   const handlePay = async () => {
+    // Disable the button BEFORE the Stripe tokenization round-trip. Previously `paying` was
+    // only set inside book() (after tokenization), so the button stayed enabled during that
+    // window and a double-click created two jobs + two authorizations.
+    if (paying) return;
+    setPaying(true);
     let paymentMethodId: string | undefined;
     try {
       paymentMethodId = await getPaymentMethodId(name.trim());
     } catch (e: any) {
+      setPaying(false);
       await modal.alert("Card error", e?.message || "Please check your card details.");
       return;
     }
@@ -255,7 +261,7 @@ function PaymentShell({
             onClick={handlePay}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary text-base font-semibold text-primary-foreground shadow-lg shadow-primary/30 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
           >
-            {paying ? "Processing…" : `Pay now · ${dollars(total)}`}
+            {paying ? "Processing…" : `Pay now · ${dollars2(total)}`}
           </button>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from "passport-jwt";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuthUser } from "../common/decorators";
+import { getAccessSecret } from "../common/jwt-secret";
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -14,7 +15,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>("JWT_ACCESS_SECRET") || "dev_access_secret_change_me",
+      secretOrKey: getAccessSecret(config),
     });
   }
 

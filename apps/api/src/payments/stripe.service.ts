@@ -19,8 +19,17 @@ export class StripeService {
     this.webhookSecret = (config.get<string>("STRIPE_WEBHOOK_SECRET") || "").trim();
     this.taxReporting1099kEnabled = (config.get<string>("STRIPE_1099K_ENABLED") || "true").trim().toLowerCase() !== "false";
     this.client = key ? new Stripe(key) : null;
-    if (!this.client) this.logger.warn("STRIPE_SECRET_KEY not set — payments are simulated.");
-    else this.logger.log(`Stripe enabled (live SDK). 1099-K reporting ${this.taxReporting1099kEnabled ? "on" : "off"}.`);
+    if (!this.client) {
+      this.logger.warn("STRIPE_SECRET_KEY not set — payments are simulated.");
+    } else {
+      // Fail closed in production: a live Stripe key with no webhook signing secret means
+      // the webhook endpoint would accept unverified (forgeable) payment-state events.
+      const isProd = (config.get<string>("NODE_ENV") || process.env.NODE_ENV || "").trim().toLowerCase() === "production";
+      if (isProd && !this.webhookSecret) {
+        throw new Error("STRIPE_WEBHOOK_SECRET must be set in production when STRIPE_SECRET_KEY is configured (otherwise webhooks are unverified and forgeable).");
+      }
+      this.logger.log(`Stripe enabled (live SDK). 1099-K reporting ${this.taxReporting1099kEnabled ? "on" : "off"}.`);
+    }
   }
 
   get taxReporting1099kOn() {

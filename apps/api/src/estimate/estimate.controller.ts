@@ -15,9 +15,12 @@ export class EstimateController {
     return this.estimate.create(dto, req.user?.id);
   }
 
+  // Public: a guest reloads checkout before signing up. Returns a REDACTED projection
+  // (no serviceAddress / customerId / internal fields) — the full row must never be
+  // exposed on an unauthenticated endpoint keyed only by the estimate id.
   @Public()
   @Get(":id")
   get(@Param("id") id: string) {
-    return this.estimate.get(id);
+    return this.estimate.getPublic(id);
   }
 }

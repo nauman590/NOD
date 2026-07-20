@@ -88,6 +88,12 @@ export class DisputesService {
   ) {
     const dispute = await this.prisma.dispute.findUnique({ where: { id } });
     if (!dispute) throw new NotFoundException("dispute not found");
+    // Resolving is not idempotent (it refunds, charges, and records a provider claw-back),
+    // so an already-finalized dispute must not be re-processed. A double-click would
+    // otherwise double the ledger refund and record a second claw-back against the provider.
+    if (dispute.status === DisputeStatus.RESOLVED || dispute.status === DisputeStatus.REJECTED) {
+      throw new BadRequestException("This dispute has already been resolved.");
+    }
     if (refundCents && additionalChargeCents) {
       throw new BadRequestException("A resolution can refund or add a charge, not both.");
     }

@@ -28,14 +28,19 @@ export class EstimateService {
     const intakeConfig = category.intakeConfig as any;
     const isDelivery = intakeConfig?.addressMode === "pickup_dropoff";
 
-    // Delivery distance feeds the price: compute from pickup/dropoff via Maps when a
-    // key is present, otherwise use a provided distance or a sensible default.
+    // Delivery distance feeds the price, so it must be server-authoritative. When Maps is
+    // configured we ALWAYS compute it from pickup/dropoff and ignore any client-supplied
+    // value (a customer could otherwise send a tiny/zero distance to under-price the job;
+    // negatives are already rejected by the DTO's @Min(0)). Only with no Maps key do we
+    // fall back to a sanitized client hint, then a sensible default.
     let distanceMiles: number | undefined;
     let driveTimeHours: number | undefined;
     if (isDelivery) {
-      distanceMiles =
-        dto.distanceMiles ??
-        (await this.maps.distanceMiles(dto.pickupAddress, dto.dropoffAddress, 6));
+      if (this.maps.enabled) {
+        distanceMiles = await this.maps.distanceMiles(dto.pickupAddress, dto.dropoffAddress, 6);
+      } else {
+        distanceMiles = dto.distanceMiles !== undefined && dto.distanceMiles >= 0 ? dto.distanceMiles : 6;
+      }
       driveTimeHours = Math.round((distanceMiles / 25) * 100) / 100; // ~25mph city avg
     }
 
@@ -149,5 +154,26 @@ export class EstimateService {
     const estimate = await this.prisma.estimate.findUnique({ where: { id } });
     if (!estimate) throw new NotFoundException("estimate not found");
     return estimate;
+  }
+
+  // Redacted projection for the PUBLIC GET /estimate/:id (a guest reloads checkout before
+  // creating an account). Returns only the pricing fields the checkout UI needs — never
+  // customer PII (serviceAddress, customerId, intakeData) or internal fields (inputsHash),
+  // which the full row would otherwise leak to anyone holding the estimate id.
+  async getPublic(id: string) {
+    const e = await this.prisma.estimate.findUnique({ where: { id } });
+    if (!e) throw new NotFoundException("estimate not found");
+    return {
+      id: e.id,
+      categoryId: e.categoryId,
+      description: e.description,
+      photoUrl: e.photoUrl,
+      distanceMiles: e.distanceMiles,
+      estimatedHours: e.estimatedHours,
+      basePriceCents: e.basePriceCents,
+      breakdown: e.breakdown,
+      suggestedAddOns: e.suggestedAddOns,
+      lockedUntil: e.lockedUntil,
+    };
   }
 }

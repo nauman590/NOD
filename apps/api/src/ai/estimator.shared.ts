@@ -85,6 +85,31 @@ export function renderPrompt(params: EstimateParams): string {
 
 const SUPPORTED_IMAGE = /^image\/(jpeg|png|webp|gif)$/;
 
+// SSRF guard for server-side image fetches. The ONLY remote URL the app ever generates
+// for a photo is its own uploads endpoint (POST /api/uploads → `${PUBLIC_API_URL}/uploads/…`),
+// so we allow exactly that origin + path and refuse everything else. Without this, a
+// caller could set photoUrl to http://169.254.169.254/… (cloud metadata) or any internal
+// host and have the server fetch it. `data:` URIs never reach here (handled before fetch).
+function isAllowedImageUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const selfBase = (process.env.PUBLIC_API_URL || "http://localhost:3001").replace(/\/+$/, "");
+  let self: URL;
+  try {
+    self = new URL(selfBase);
+  } catch {
+    return false;
+  }
+  // Same origin as our own API, and only paths under the static uploads prefix. URL()
+  // normalises `..` traversal, so a normalised path must still start with /uploads/.
+  return u.protocol === self.protocol && u.host === self.host && u.pathname.startsWith("/uploads/");
+}
+
 // Turn a photoUrl into raw base64 image bytes usable by either provider. Local upload
 // URLs (e.g. http://localhost:3001/uploads/…) aren't reachable by the model providers'
 // servers, so we fetch the bytes ourselves and inline them. Unsupported types → null.
@@ -100,6 +125,10 @@ export async function resolveImageData(
       return { mediaType: m[1], base64: m[2] };
     }
     if (/^https?:\/\//.test(photoUrl)) {
+      if (!isAllowedImageUrl(photoUrl)) {
+        logger?.warn(`Refusing to fetch estimate image from a non-allowlisted URL (SSRF guard) — estimating without it.`);
+        return null;
+      }
       const res = await fetch(photoUrl);
       if (!res.ok) return null;
       const mediaType = (res.headers.get("content-type") || "image/jpeg").split(";")[0].trim();

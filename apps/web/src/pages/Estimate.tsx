@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Lock, Sparkles, Check } from "lucide-react";
 import { api } from "@/lib/api";
 import type { EstimateResult } from "@/lib/types";
-import { dollars } from "@/lib/types";
+import { dollars2 } from "@/lib/types";
 
 interface TaskDraft {
   photoUrl: string | null;
@@ -73,12 +73,18 @@ export default function Estimate() {
     return () => clearInterval(t);
   }, []);
 
+  // Every line item that makes up the total, in the same order the server sums them so the
+  // rows visibly reconcile to basePriceCents. Previously the trip fee (always present) and
+  // the junk volume charge were omitted, so the itemization never added up to the price.
   const rows = useMemo(() => {
     if (!estimate) return [];
     const b = estimate.breakdown;
+    const laborHours = b.estimatedHours + (b.driveTimeHours || 0);
     const list: { label: string; cents: number }[] = [
-      { label: `Labor (${b.estimatedHours}h @ ${dollars(b.avgRateCents)}/hr)`, cents: b.laborCents },
+      { label: `Labor (${laborHours}h @ ${dollars2(b.avgRateCents)}/hr)`, cents: b.laborCents },
     ];
+    if (b.volumeCents) list.push({ label: `Volume (${b.volumeCubicYards} cu yd)`, cents: b.volumeCents });
+    if (b.tripCents) list.push({ label: "Trip fee", cents: b.tripCents });
     if (b.mileageCents) list.push({ label: "Mileage", cents: b.mileageCents });
     if (b.baseFeeCents) list.push({ label: "Service fee", cents: b.baseFeeCents });
     if (b.disposalFeeCents) list.push({ label: "Disposal fee", cents: b.disposalFeeCents });
@@ -120,7 +126,7 @@ export default function Estimate() {
         </div>
 
         <div className="mt-3 flex items-baseline gap-2">
-          <span className="text-7xl font-bold tracking-tight leading-none">{dollars(estimate.basePriceCents)}</span>
+          <span className="text-7xl font-bold tracking-tight leading-none">{dollars2(estimate.basePriceCents)}</span>
           <span className="text-2xl font-semibold text-muted-foreground">estimated</span>
         </div>
 
@@ -134,9 +140,13 @@ export default function Estimate() {
             {rows.map((r) => (
               <li key={r.label} className="flex items-center justify-between px-4 py-3.5">
                 <span className="text-sm">{r.label}</span>
-                <span className="text-sm font-semibold">{dollars(r.cents)}</span>
+                <span className="text-sm font-semibold">{dollars2(r.cents)}</span>
               </li>
             ))}
+            <li className="flex items-center justify-between px-4 py-3.5">
+              <span className="text-sm font-semibold">Total</span>
+              <span className="text-sm font-bold">{dollars2(estimate.basePriceCents)}</span>
+            </li>
           </ul>
           <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
             {["Same-day or next-day scheduling", "Vetted, insured professionals", "Free cancellation before a pro is en route"].map((t) => (
@@ -160,7 +170,7 @@ export default function Estimate() {
             onClick={() => navigate("/checkout")}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary text-base font-semibold text-primary-foreground shadow-lg shadow-primary/30 transition active:scale-[0.99]"
           >
-            Confirm and pay · {dollars(estimate.basePriceCents)}
+            Confirm and pay · {dollars2(estimate.basePriceCents)}
           </button>
         </div>
       </div>

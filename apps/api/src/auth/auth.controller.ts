@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Patch, Post } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
 import { RegisterCustomerDto, RegisterProviderDto, LoginDto, RefreshDto, UpdateAccountDto, ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto, RequestOtpDto, VerifyOtpDto } from "./dto";
 import { Public, CurrentUser, AuthUser } from "../common/decorators";
@@ -19,6 +20,9 @@ export class AuthController {
     return this.auth.registerProvider(dto);
   }
 
+  // Tight per-IP limit to blunt credential-stuffing / brute force (skipped when
+  // THROTTLE_DISABLED=true, e.g. E2E which logs in many times from one IP).
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Public()
   @Post("login")
   login(@Body() dto: LoginDto) {
@@ -31,6 +35,8 @@ export class AuthController {
     return this.auth.refresh(dto.refreshToken);
   }
 
+  // Password-reset emails cost money/annoy users; cap requests per IP.
+  @Throttle({ default: { limit: 5, ttl: 900000 } })
   @Public()
   @Post("forgot-password")
   forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -63,7 +69,9 @@ export class AuthController {
     return this.auth.changePassword(user.id, dto.currentPassword, dto.newPassword);
   }
 
-  // Phone verification (SMS OTP).
+  // Phone verification (SMS OTP). Each request sends a real SMS once Twilio is live, so
+  // cap it hard per IP to prevent OTP → SMS toll-fraud.
+  @Throttle({ default: { limit: 5, ttl: 600000 } })
   @Post("phone/request-otp")
   requestOtp(@CurrentUser() user: AuthUser, @Body() dto: RequestOtpDto) {
     return this.auth.requestPhoneOtp(user.id, dto.phone);

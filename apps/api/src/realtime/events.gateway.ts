@@ -14,6 +14,7 @@ import { Server, Socket } from "socket.io";
 import { Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeService } from "./realtime.service";
+import { getAccessSecret } from "../common/jwt-secret";
 
 const CORS_ENV = (process.env.CORS_ORIGINS || "http://localhost:5173").trim();
 const GATEWAY_CORS = { origin: CORS_ENV === "*" ? true : CORS_ENV.split(",").map((s) => s.trim()), credentials: true };
@@ -43,7 +44,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection {
         return;
       }
       const payload = await this.jwt.verifyAsync(token, {
-        secret: this.config.get<string>("JWT_ACCESS_SECRET") || "dev_access_secret_change_me",
+        secret: getAccessSecret(this.config),
       });
       const userId: string = payload.sub;
       const role: Role = payload.role;
@@ -88,6 +89,9 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection {
   @SubscribeMessage("provider:location")
   async onLocation(@ConnectedSocket() socket: Socket, @MessageBody() data: { jobId: string; lat: number; lng: number }) {
     if (socket.data.role !== Role.PROVIDER) return;
+    // Only the provider ASSIGNED to this job may publish its GPS — otherwise any provider
+    // could inject fake coordinates into a stranger's live job map.
+    if (!(await this.canAccessJob(socket, data.jobId))) return;
     this.realtime.emit(this.realtime.jobRoom(data.jobId), "provider.location", {
       jobId: data.jobId,
       lat: data.lat,
@@ -98,8 +102,29 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection {
 
   // Allow a client to explicitly join a job room (e.g. after creating/claiming a job mid-session).
   @SubscribeMessage("job:subscribe")
-  onJobSubscribe(@ConnectedSocket() socket: Socket, @MessageBody() data: { jobId: string }) {
+  async onJobSubscribe(@ConnectedSocket() socket: Socket, @MessageBody() data: { jobId: string }) {
+    // Authorize before joining — the job room streams private chat, live status, and the
+    // provider's real-time location. Only the job's customer, its assigned provider, or an
+    // admin may listen in; a stranger's jobId must not grant access.
+    if (!(await this.canAccessJob(socket, data.jobId))) return { ok: false };
     socket.join(this.realtime.jobRoom(data.jobId));
     return { ok: true };
+  }
+
+  // Whether the connected user may access a job's realtime room. Admins see every job; a
+  // customer only their own; a provider only jobs assigned to them. Everything flowing
+  // through a job room (chat, status, GPS) is private, so both join and emit gate on this.
+  private async canAccessJob(socket: Socket, jobId: string): Promise<boolean> {
+    const userId: string | undefined = socket.data.userId;
+    const role: Role | undefined = socket.data.role;
+    if (!userId || !jobId) return false;
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      select: { customerId: true, provider: { select: { userId: true } } },
+    });
+    if (!job) return false;
+    if (role === Role.ADMIN) return true;
+    if (role === Role.PROVIDER) return job.provider?.userId === userId;
+    return job.customerId === userId;
   }
 }

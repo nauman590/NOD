@@ -22,6 +22,12 @@ export default function ProviderAccount() {
   const [confirm, setConfirm] = useState("");
   const [savingPw, setSavingPw] = useState(false);
 
+  // SMS notifications + phone verification
+  const [smsOptIn, setSmsOptIn] = useState(true);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
+
   useEffect(() => {
     document.title = "Account — Tasker";
   }, []);
@@ -31,8 +37,53 @@ export default function ProviderAccount() {
       setFullName(user.fullName ?? "");
       setEmail(user.email ?? "");
       setPhone(user.phone ?? "");
+      setSmsOptIn(user.smsOptIn ?? true);
     }
   }, [user]);
+
+  const toggleSmsOptIn = async (value: boolean) => {
+    setSmsOptIn(value);
+    try {
+      await api("/auth/profile", { method: "PATCH", body: { smsOptIn: value } });
+      await refreshMe();
+    } catch (e: any) {
+      setSmsOptIn(!value);
+      await modal.alert("Couldn't update", e?.message || "Please try again.");
+    }
+  };
+
+  const requestOtp = async () => {
+    setOtpBusy(true);
+    try {
+      const r = await api<{ ok: boolean; sent: boolean; devCode?: string }>("/auth/phone/request-otp", { method: "POST", body: { phone: phone.trim() || undefined } });
+      setOtpSent(true);
+      if (r.devCode) {
+        // Dev/stub mode (no Twilio): surface the code so verification can be completed.
+        await modal.alert("Verification code sent", `SMS isn't live in this environment, so here's your code: ${r.devCode}`);
+        setOtpCode(r.devCode);
+      } else {
+        await modal.alert("Code sent", "Enter the 6-digit code we texted you.");
+      }
+    } catch (e: any) {
+      await modal.alert("Couldn't send code", e?.message || "Add a phone number first.");
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    setOtpBusy(true);
+    try {
+      await api("/auth/phone/verify-otp", { method: "POST", body: { code: otpCode.trim() } });
+      await refreshMe();
+      setOtpSent(false); setOtpCode("");
+      await modal.alert("Phone verified", "Your phone number is now verified.");
+    } catch (e: any) {
+      await modal.alert("Couldn't verify", e?.message || "Check the code and try again.");
+    } finally {
+      setOtpBusy(false);
+    }
+  };
 
   // The provider's avatar lives on the Provider profile (not the User), so fetch it.
   useEffect(() => {
@@ -121,6 +172,39 @@ export default function ProviderAccount() {
             className="mt-5 flex h-12 w-full items-center justify-center rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-md shadow-primary/30 disabled:opacity-60">
             {savingProfile ? "Saving…" : "Save profile"}
           </button>
+        </section>
+
+        <section className="mt-6 rounded-3xl border border-border bg-card p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">SMS &amp; notifications</h2>
+          <label className="mt-4 flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={smsOptIn} onChange={(e) => toggleSmsOptIn(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border accent-primary" />
+            <span className="text-sm text-muted-foreground">Text me SMS updates about jobs (new jobs in my area, add-on decisions, cancellations &amp; payouts).</span>
+          </label>
+
+          <div className="mt-4 border-t border-border pt-4">
+            {user?.phoneVerified ? (
+              <p className="text-sm font-medium text-primary">✓ Phone verified{phone ? ` — ${phone}` : ""}</p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">Verify your phone number to receive SMS updates and claim jobs.</p>
+                {!otpSent ? (
+                  <button disabled={otpBusy} onClick={requestOtp}
+                    className="flex h-11 w-full items-center justify-center rounded-2xl border border-primary text-sm font-semibold text-primary disabled:opacity-60">
+                    {otpBusy ? "Sending…" : "Send verification code"}
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <input value={otpCode} onChange={(e) => setOtpCode(e.target.value)} placeholder="6-digit code" inputMode="numeric"
+                      className="h-11 flex-1 rounded-xl border border-border bg-background px-3 text-base outline-none focus:border-primary" />
+                    <button disabled={otpBusy || otpCode.trim().length < 4} onClick={verifyOtp}
+                      className="h-11 rounded-2xl bg-primary px-5 text-sm font-semibold text-primary-foreground disabled:opacity-60">
+                      {otpBusy ? "…" : "Verify"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </section>
 
         <section className="mt-6 rounded-3xl border border-border bg-card p-5">

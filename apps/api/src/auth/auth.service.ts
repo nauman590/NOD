@@ -6,6 +6,7 @@ import * as bcrypt from "bcryptjs";
 import * as crypto from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { getAccessSecret } from "../common/jwt-secret";
 import { RegisterCustomerDto, RegisterProviderDto, LoginDto } from "./dto";
 
 @Injectable()
@@ -23,7 +24,7 @@ export class AuthService {
 
     const accessToken = await this.jwt.signAsync(
       { sub: user.id, role: user.role },
-      { secret: this.config.get<string>("JWT_ACCESS_SECRET"), expiresIn: accessTtl } as any,
+      { secret: getAccessSecret(this.config), expiresIn: accessTtl } as any,
     );
 
     const refreshToken = crypto.randomBytes(48).toString("hex");

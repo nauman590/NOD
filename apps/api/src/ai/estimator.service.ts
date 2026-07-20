@@ -9,8 +9,8 @@ export { EstimateAiResult, EstimateParams } from "./estimator.shared";
 type ProviderName = "openai" | "anthropic" | "heuristic";
 
 // Provider-flexible AI pricing dispatcher.
-//   AI_PROVIDER=auto (default) → use OpenAI if its key is set, else Claude if its key
-//                                is set, else the deterministic heuristic.
+//   AI_PROVIDER=auto (default) → use Claude if ANTHROPIC_API_KEY is set, else OpenAI if
+//                                OPENAI_API_KEY is set, else the deterministic heuristic.
 //   AI_PROVIDER=openai|anthropic|heuristic → force that provider.
 // The brief requires the price to display within 5 seconds; AI_SLA_MS (default 5000)
 // bounds the wait — if the live model doesn't answer in time, we return the instant
@@ -42,9 +42,9 @@ export class EstimatorService {
     if (configured === "anthropic" || configured === "claude")
       return this.anthropic.hasKey ? "anthropic" : "heuristic";
     if (configured === "heuristic") return "heuristic";
-    // auto: prefer OpenAI, then Claude, then heuristic.
-    if (this.openai.hasKey) return "openai";
+    // auto: prefer Claude, then OpenAI, then heuristic.
     if (this.anthropic.hasKey) return "anthropic";
+    if (this.openai.hasKey) return "openai";
     return "heuristic";
   }
 

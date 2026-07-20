@@ -139,10 +139,25 @@ export class JobsService implements OnModuleInit {
     };
   }
 
+  // Phone-verification gate. When PHONE_VERIFICATION_REQUIRED=true, a user must have a
+  // verified phone before booking (customer) or claiming (provider). Off by default so
+  // seeded/E2E users (pre-verified) and keyless dev aren't blocked.
+  private phoneVerificationRequired(): boolean {
+    return (this.config.get<string>("PHONE_VERIFICATION_REQUIRED") || "false").trim().toLowerCase() === "true";
+  }
+
+  private async assertPhoneVerified(userId: string, action: string) {
+    if (!this.phoneVerificationRequired()) return;
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { phoneVerified: true } });
+    if (!user?.phoneVerified) throw new BadRequestException(`Verify your phone number before you can ${action}.`);
+  }
+
   async createFromEstimate(dto: CreateJobDto, customerId: string) {
     const customer = await this.prisma.user.findUnique({ where: { id: customerId } });
     if (customer?.suspendedUntil && customer.suspendedUntil > new Date())
       throw new ForbiddenException(customer.suspendedReason || "Your account is suspended");
+    if (this.phoneVerificationRequired() && !customer?.phoneVerified)
+      throw new BadRequestException("Verify your phone number before you can book a job.");
     const estimate = await this.prisma.estimate.findUnique({ where: { id: dto.estimateId } });
     if (!estimate) throw new NotFoundException("estimate not found");
     if (estimate.consumed) throw new BadRequestException("estimate already used");
@@ -151,6 +166,16 @@ export class JobsService implements OnModuleInit {
     const address = dto.serviceAddress ?? estimate.serviceAddress ?? null;
 
     const job = await this.prisma.$transaction(async (tx) => {
+      // Atomically claim the estimate BEFORE creating the job: only the first request flips
+      // consumed false→true. The pre-check above is a fast path; this updateMany is what
+      // actually prevents the race — two concurrent checkouts (or a double-click while
+      // Stripe tokenizes) would otherwise both pass the check-then-act guard and each create
+      // a job + authorize a base hold, double-booking and double-charging the customer.
+      const claimed = await tx.estimate.updateMany({
+        where: { id: estimate.id, consumed: false },
+        data: { consumed: true },
+      });
+      if (claimed.count === 0) throw new ConflictException("estimate already used");
       const created = await tx.job.create({
         data: {
           customerId,
@@ -169,7 +194,6 @@ export class JobsService implements OnModuleInit {
         },
         include: this.jobInclude,
       });
-      await tx.estimate.update({ where: { id: estimate.id }, data: { consumed: true } });
       return created;
     });
 
@@ -304,6 +328,7 @@ export class JobsService implements OnModuleInit {
   // Atomic first-to-claim-wins.
   async claim(jobId: string, userId: string) {
     const provider = await this.providers.assertCanClaim(userId);
+    await this.assertPhoneVerified(userId, "claim jobs");
 
     const result = await this.prisma.job.updateMany({
       where: { id: jobId, status: JobStatus.AVAILABLE, providerId: null },
@@ -514,6 +539,7 @@ export class JobsService implements OnModuleInit {
     if (!job) throw new NotFoundException("job not found");
     if (job.customerId !== customerId) throw new ForbiddenException("not your job");
 
+    const priorStatus = job.status;
     const pending = job.adjustments.filter((a) => a.status === "PENDING");
     const pendingIds = pending.map((a) => a.id);
     // Flip only the adjustments we just read, gated on status=PENDING. The count tells us
@@ -528,7 +554,26 @@ export class JobsService implements OnModuleInit {
       return res.count;
     });
     if (approvedNow > 0) {
-      await this.payments.chargeAddOns(jobId, customerId, pending);
+      try {
+        await this.payments.chargeAddOns(jobId, customerId, pending);
+      } catch (e) {
+        // The charge (off-session) can decline. The approval was already committed above, so
+        // roll it back — otherwise the job is left "approved but unpaid" and the provider gets
+        // paid at completion for add-ons the customer was never charged for. Restore the
+        // adjustments to PENDING and the job to its prior status so the customer can retry
+        // after fixing their card.
+        await this.prisma.$transaction(async (tx) => {
+          await tx.adjustment.updateMany({
+            where: { jobId, id: { in: pendingIds }, status: "APPROVED" },
+            data: { status: "PENDING", approvedAt: null },
+          });
+          await tx.job.update({ where: { id: jobId }, data: { status: priorStatus } });
+        });
+        this.logger.warn(`Add-on charge failed for job ${jobId}; approval rolled back: ${(e as Error).message}`);
+        throw new BadRequestException(
+          "Your card was declined for the added items. The add-ons are still pending — update your payment method and approve again.",
+        );
+      }
     }
 
     const updated = await this.prisma.job.findUnique({ where: { id: jobId }, include: this.jobInclude });
@@ -579,6 +624,14 @@ export class JobsService implements OnModuleInit {
     const isCustomer = job.customerId === user.id;
     const isProvider = job.provider?.userId === user.id;
     if (!isCustomer && !isProvider && user.role !== Role.ADMIN) throw new ForbiddenException("not your job");
+
+    // A terminal job can't be cancelled. Without this guard, cancelling an already
+    // COMPLETE/CANCELLED/DECLINED job would charge a bogus cancellation fee and flip the
+    // status to CANCELLED, and repeated calls would re-charge every time.
+    const terminal: JobStatus[] = [JobStatus.COMPLETE, JobStatus.CANCELLED, JobStatus.DECLINED];
+    if (terminal.includes(job.status)) {
+      throw new ConflictException(`Cannot cancel a job that is already ${job.status.toLowerCase()}`);
+    }
 
     // Determine cancellation tier from current lifecycle state.
     let tier: CancellationTier;
@@ -631,6 +684,12 @@ export class JobsService implements OnModuleInit {
   // Provider reports the customer was a no-show on arrival → 50% fee.
   async reportNoShow(jobId: string, userId: string) {
     const { job } = await this.assertOwningProvider(jobId, userId);
+    // A customer no-show is only observable once the provider has ARRIVED. Guarding on
+    // ARRIVED blocks charging the customer 50% from CLAIMED/EN_ROUTE (the provider never
+    // actually arrived) and blocks re-charging a completed/cancelled (terminal) job.
+    if (job.status !== JobStatus.ARRIVED) {
+      throw new ConflictException("A customer no-show can only be reported after you've arrived at the job");
+    }
     const updated = await this.prisma.job.update({
       where: { id: job.id },
       data: {
