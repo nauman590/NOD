@@ -213,15 +213,30 @@ export class ProvidersService {
     return Math.round(sum / rows.length);
   }
 
-  // Active providers serving a category (for the "new job available" broadcast). Returns
-  // the provider id + userId (+ smsOptIn) capped at `limit`, so the caller can notify them.
+  // Active providers serving a category (for the "new job available" broadcast), capped at
+  // `limit` so the fan-out stays bounded.
+  //
+  // The cap must ROTATE. An unordered `take: limit` returns the same arbitrary slice every
+  // time, so once a category has more than `limit` active providers the earliest ones win
+  // every broadcast and everyone after them is never notified again — they'd only ever find
+  // work by manually refreshing the job feed. Ordering by each provider's most recent
+  // NEW_JOB_AVAILABLE (never-notified first) turns the cap into a fair round-robin.
   async activeProvidersForCategory(categoryId: string, limit = 25): Promise<{ id: string; userId: string }[]> {
-    const rates = await this.prisma.providerCategoryRate.findMany({
-      where: { categoryId, active: true, provider: { status: ProviderStatus.ACTIVE } },
-      select: { provider: { select: { id: true, userId: true } } },
-      take: limit,
-    });
-    return rates.map((r) => r.provider);
+    return this.prisma.$queryRaw<{ id: string; userId: string }[]>`
+      SELECT p."id", p."userId"
+      FROM "ProviderCategoryRate" r
+      JOIN "Provider" p ON p."id" = r."providerId"
+      LEFT JOIN LATERAL (
+        SELECT MAX(n."createdAt") AS last_at
+        FROM "Notification" n
+        WHERE n."userId" = p."userId" AND n."template" = 'NEW_JOB_AVAILABLE'
+      ) l ON TRUE
+      WHERE r."categoryId" = ${categoryId}
+        AND r."active" = true
+        AND p."status" = 'ACTIVE'::"ProviderStatus"
+      ORDER BY l.last_at ASC NULLS FIRST, p."id" ASC
+      LIMIT ${limit}
+    `;
   }
 
   // Categories this provider is active in (for the job feed).

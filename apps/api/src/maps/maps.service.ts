@@ -20,6 +20,12 @@ export class MapsService {
     return !!this.key;
   }
 
+  // The dispatch hub the provider pool is measured from. Non-secret; surfaced for admin
+  // diagnostics so an operator can confirm which service area this instance is pricing.
+  get hubAddress(): string {
+    return (this.config.get<string>("SERVICE_HUB_ADDRESS") || "").trim();
+  }
+
   async geocode(address: string): Promise<LatLng | null> {
     if (!this.key || !address) return null;
     try {

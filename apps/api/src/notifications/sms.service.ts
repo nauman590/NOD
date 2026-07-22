@@ -28,6 +28,17 @@ export class SmsService {
     this.messagingServiceSid = (config.get<string>("TWILIO_MESSAGING_SERVICE_SID") || "").trim();
     if (this.enabled) {
       this.logger.log(`Twilio SMS enabled (${this.messagingServiceSid ? "messaging service" : `from ${this.from}`}).`);
+      if (!this.messagingServiceSid) {
+        // US carriers block application-to-person traffic from an unregistered long code.
+        // Twilio still ACCEPTS these sends (we get a message SID and report sent:true) and
+        // only drops them downstream, so without this warning the app looks healthy while
+        // delivering nothing. 10DLC registration requires sending via a Messaging Service.
+        this.logger.warn(
+          "Twilio is sending from a bare from-number. US A2P traffic requires 10DLC " +
+            "registration (Brand + Campaign) and must send via a Messaging Service — set " +
+            "TWILIO_MESSAGING_SERVICE_SID once registered, or carriers will filter these messages.",
+        );
+      }
     } else {
       this.logger.warn("Twilio not configured — SMS is stubbed (messages logged, not sent).");
     }
@@ -36,6 +47,21 @@ export class SmsService {
   // Enabled only when we have credentials AND a sender (a from-number or messaging service).
   get enabled(): boolean {
     return !!(this.accountSid && this.authToken && (this.from || this.messagingServiceSid));
+  }
+
+  // Which sender real SMS goes out from — the from-number, or "messaging-service" when a
+  // Messaging Service SID is used (its SID is a credential, so it is never echoed back).
+  // Null when Twilio isn't configured. Diagnostics only; contains no secret.
+  get senderDescription(): string | null {
+    if (!this.enabled) return null;
+    return this.messagingServiceSid ? "messaging-service" : this.from;
+  }
+
+  // True when sending through a Messaging Service — the delivery path US A2P traffic needs.
+  // Surfaced so an operator can see at a glance that a "Twilio enabled" instance is still
+  // on the unregistered long-code path that carriers filter.
+  get usesMessagingService(): boolean {
+    return this.enabled && !!this.messagingServiceSid;
   }
 
   async send(to: string | null | undefined, body: string): Promise<SmsSendResult> {

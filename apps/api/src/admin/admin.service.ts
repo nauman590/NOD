@@ -9,6 +9,10 @@ import { CheckrService } from "../providers/checkr.service";
 import { JobsService } from "../jobs/jobs.service";
 import { RatingsService } from "../ratings/ratings.service";
 import { StrikeReason } from "@prisma/client";
+import { SmsService } from "../notifications/sms.service";
+import { StripeService } from "../payments/stripe.service";
+import { MapsService } from "../maps/maps.service";
+import { EstimatorService } from "../ai/estimator.service";
 
 @Injectable()
 export class AdminService {
@@ -21,7 +25,32 @@ export class AdminService {
     private checkrService: CheckrService,
     private jobsService: JobsService,
     private ratingsService: RatingsService,
+    private smsService: SmsService,
+    private stripeService: StripeService,
+    private mapsService: MapsService,
+    private estimatorService: EstimatorService,
   ) {}
+
+  // Which third-party integrations are actually wired on this instance. Booleans and
+  // non-secret config only — never the keys themselves — so an admin (and the live E2E
+  // suite) can tell "configured" from "gracefully stubbed" without reading server logs.
+  integrations() {
+    return {
+      maps: {
+        enabled: this.mapsService.enabled,
+        hubAddress: this.mapsService.hubAddress || null,
+        jobRadiusMiles: this.jobsService.serviceRadiusMiles,
+      },
+      sms: {
+        enabled: this.smsService.enabled,
+        sender: this.smsService.senderDescription,
+        usesMessagingService: this.smsService.usesMessagingService,
+      },
+      stripe: { enabled: this.stripeService.enabled },
+      checkr: { enabled: this.checkrService.enabled },
+      ai: { provider: this.estimatorService.activeProvider, modelEnabled: this.estimatorService.modelEnabled },
+    };
+  }
 
   // Admin-sent Stripe Connect onboarding link for a recruited provider (Sprint 5).
   providerConnectLink(providerId: string) {

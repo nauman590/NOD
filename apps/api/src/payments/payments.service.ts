@@ -333,6 +333,28 @@ export class PaymentsService {
         capturedAt: new Date(),
       },
     });
+
+    // Credit the provider in the ledger too. The row above is the CUSTOMER's charge, so on
+    // its own the fee never appears in the provider's earnings (providers.earnings sums
+    // PAYOUT rows owned by the provider) — and if the transfer above couldn't run (no
+    // connected account yet, payouts disabled), nothing recorded that they are owed it at
+    // all. Mirrors capture(), which always writes a PAYOUT row even when the transfer is
+    // skipped, so the ledger stays the source of truth either way.
+    if (job.provider?.userId) {
+      await this.prisma.payment.create({
+        data: {
+          jobId,
+          userId: job.provider.userId,
+          type: PaymentType.PAYOUT,
+          status: PaymentStatus.CAPTURED,
+          amountCents: feeCents,
+          platformFeeCents: 0,
+          providerNetCents: feeCents,
+          stripeTransferId,
+          capturedAt: new Date(),
+        },
+      });
+    }
     return { feeCents, refundedAddOnCents };
   }
 

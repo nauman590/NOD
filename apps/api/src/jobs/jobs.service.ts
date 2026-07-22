@@ -224,6 +224,10 @@ export class JobsService implements OnModuleInit {
   private jobRadiusMiles(): number {
     return Math.max(1, parseInt(this.config.get<string>("PROVIDER_JOB_RADIUS_MILES") || "15", 10));
   }
+  /** The broadcast service radius, surfaced for admin diagnostics. */
+  get serviceRadiusMiles(): number {
+    return this.jobRadiusMiles();
+  }
   private notifyLimit(): number {
     return Math.max(1, parseInt(this.config.get<string>("PROVIDER_JOB_NOTIFY_LIMIT") || "25", 10));
   }

@@ -23,7 +23,12 @@ let proName: string;
 
 const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
 const uniq = () => `${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-const uniqPhone = () => `+1${String(Math.floor(Math.random() * 1e10)).padStart(10, "0")}`;
+// Unroutable by construction: 555 is not a dialable US area code, so Twilio rejects these
+// with error 21211 rather than delivering anything. NEVER generate a random +1 number here
+// — a well-formed one can belong to a real subscriber, and with Twilio configured this
+// suite would text strangers a live verification code. It also breaks the tests: a send
+// Twilio accepts reports sent:true and withholds devCode, which these specs rely on.
+const uniqPhone = () => `+1555${String(Math.floor(Math.random() * 1e7)).padStart(7, "0")}`;
 
 // Full real-Stripe job lifecycles per test — allow more than the default 30s under load.
 test.describe.configure({ timeout: 120_000 });

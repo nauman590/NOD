@@ -43,6 +43,14 @@ export class AdminController {
     return this.admin.analytics();
   }
 
+  // Which third-party integrations are live on this instance (booleans + non-secret
+  // config). Lets an operator confirm Maps/Twilio/Stripe/Checkr/AI are really wired
+  // rather than gracefully stubbed, without grepping server logs.
+  @Get("integrations")
+  integrations() {
+    return this.admin.integrations();
+  }
+
   @Post("payments/:id/refund")
   refund(@Param("id") id: string, @Body() body: RefundDto) {
     return this.admin.refundPayment(id, body?.amountCents);
