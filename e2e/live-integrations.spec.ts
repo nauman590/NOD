@@ -212,9 +212,21 @@ test.describe("Google Maps (server key)", () => {
     expect(far.etaMinutes).toBeGreaterThan(0);
 
     // Practically on top of it — the ETA must fall.
-    const close = await (
-      await ctx.post(`${API}/jobs/${job}/location`, { headers: bearer(pro.token), data: { lat: 33.7901, lng: -84.3846 } })
-    ).json();
+    //
+    // Retried: each ping re-geocodes, and when that call fails the service deliberately
+    // KEEPS the previous ETA rather than flickering to null. So one flaky Google response
+    // leaves the ETA unchanged and looks identical to "the ETA never moved". Re-pinging
+    // distinguishes a transient miss from a real failure to recompute.
+    let close: any;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      close = await (
+        await ctx.post(`${API}/jobs/${job}/location`, {
+          headers: bearer(pro.token),
+          data: { lat: 33.7901, lng: -84.3846 },
+        })
+      ).json();
+      if (close.etaMinutes < far.etaMinutes) break;
+    }
     expect(close.etaMinutes).toBeLessThan(far.etaMinutes);
 
     // The first post-en-route ping freezes the dispatch ETA that lateness is judged

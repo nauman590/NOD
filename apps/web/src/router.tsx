@@ -30,11 +30,18 @@ import AdminCustomers from "./pages/admin/AdminCustomers";
 import AdminPayments from "./pages/admin/AdminPayments";
 import ReportIssue from "./pages/ReportIssue";
 
+// Where a signed-in user belongs when they land somewhere meant for a different role.
+// Sending everyone to "/" strands a provider or admin on the customer home.
+const homeFor = (role?: string) => (role === "PROVIDER" ? "/provider" : role === "ADMIN" ? "/admin" : "/");
+
 function RequireRole({ role, children }: { role: "PROVIDER" | "ADMIN" | "CUSTOMER"; children: ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">Loading…</div>;
   if (!user) return <Navigate to={role === "PROVIDER" ? "/provider/login" : "/"} replace />;
-  if (user.role !== role) return <Navigate to="/" replace />;
+  // Wrong role: bounce to their own home. Without this the page still renders and its
+  // queries fire against role-guarded endpoints, so the user just gets an "Insufficient
+  // role" error modal with no way forward.
+  if (user.role !== role) return <Navigate to={homeFor(user.role)} replace />;
   return <>{children}</>;
 }
 
@@ -85,9 +92,14 @@ export const router = createBrowserRouter([
   { path: "/signup", element: <CustomerSignup /> },
   { path: "/forgot-password", element: <ForgotPassword /> },
   { path: "/reset-password", element: <ResetPassword /> },
-  { path: "/my-jobs", element: <MyJobs /> },
-  { path: "/account", element: <CustomerAccount /> },
-  { path: "/job/:jobId", element: <JobTracking /> },
+  // Customer-only screens. These call CUSTOMER-guarded endpoints (/jobs/mine, the
+  // add-on approve/decline actions), so a provider or admin session must be redirected
+  // rather than left to render a page that can only 403.
+  { path: "/my-jobs", element: <RequireRole role="CUSTOMER"><MyJobs /></RequireRole> },
+  { path: "/account", element: <RequireRole role="CUSTOMER"><CustomerAccount /></RequireRole> },
+  { path: "/job/:jobId", element: <RequireRole role="CUSTOMER"><JobTracking /></RequireRole> },
+  // Rating and dispute reporting are deliberately NOT role-locked — the brief makes both
+  // two-way, their APIs are role-agnostic, and the provider dashboard links to /report.
   { path: "/job/:jobId/rate", element: <RateJob /> },
   { path: "/job/:jobId/report", element: <ReportIssue /> },
   { path: "/provider/login", element: <ProviderLogin /> },

@@ -8,15 +8,23 @@ const API = "http://localhost:3001/api";
 // drift in any of them (a fee rate, a strike threshold) costs real money without failing
 // anything else.
 //
-// Covered, quoting the brief:
+// Covered here, quoting the brief:
 //   Payment splits    — 18% platform on base, 82% to provider, 0% on add-ons,
 //                       provider receives 100% of cancellation fees
-//   Cancellation      — free before claim / $10 after claim / 25% after en route /
-//                       50% customer no-show / 3 no-shows in 60 days → suspension
+//   Cancellation      — free before claim / $10 flat after claim / 50% customer no-show;
+//                       3 customer no-shows in 60 days → suspension
 //   Provider strikes  — 3 in 30 days → 7-day suspension; 5 in 90 days → deactivation
-//   Late arrival      — 20+ min late without a delay notice → 10% credited to customer
 //   Price lock        — 15 minutes
 //   Messaging         — no contact channel until the job is in progress
+//
+// Covered elsewhere: the 25%-after-en-route tier and provider-cancel behaviour live in
+// provider-cancel-billing.spec.ts; the $15–25 claim-and-no-show penalty in
+// sprint4-accountability.spec.ts.
+//
+// NOT covered by any spec — needs a way to control time, since it depends on a real 20+
+// minute overrun against a frozen dispatch ETA:
+//   Late arrival      — 20+ min late without a delay notice → 10% credited to customer
+//                       (implemented in jobs.service.arrived(); verify manually)
 //
 // Everything runs against the real API and real Stripe test mode.
 

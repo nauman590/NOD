@@ -1,10 +1,11 @@
 import { useNavigate, Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Upload, Camera, ChevronDown, ArrowRight, X, Loader2, MapPin, ClipboardList } from "lucide-react";
+import { Upload, Camera, ChevronDown, ArrowRight, X, Loader2, ClipboardList } from "lucide-react";
 import { api, uploadFile, getAccessToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import NotificationsBell from "@/components/NotificationsBell";
+import AddressAutocomplete from "@/components/AddressAutocomplete";
 import type { Category } from "@/lib/types";
 
 export default function Index() {
@@ -286,15 +287,13 @@ function Addr({ label, value, onChange, placeholder, icon }: { label: string; va
   return (
     <div>
       <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</label>
-      <div className="relative">
-        {icon && <MapPin className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />}
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className={`h-12 w-full rounded-2xl border border-border bg-card ${icon ? "pl-11" : "px-4"} pr-4 text-base outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15`}
-        />
-      </div>
+      <AddressAutocomplete
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        icon={icon}
+        inputClassName={`h-12 w-full rounded-2xl border border-border bg-card ${icon ? "pl-11" : "px-4"} pr-4 text-base outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15`}
+      />
     </div>
   );
 }

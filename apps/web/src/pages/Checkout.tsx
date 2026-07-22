@@ -128,17 +128,28 @@ function useCheckout(estimate: EstimateResult, addressText: string) {
 
   const signedInCustomer = !!user && user.role === "CUSTOMER" && !user.isGuest;
 
+  // Booking is customer-only (POST /jobs is role-guarded). A provider or admin session
+  // reaching this point used to fall through to the API and come back "Insufficient role",
+  // which tells the user nothing and offers no way out — worse, an admin entering their own
+  // email hit the 409 branch below, "recovered" by logging back in as that same admin, and
+  // still failed. Fail here instead, in language that says what to do.
+  const wrongRoleMessage = "You're signed in as a provider or admin account. Log out and use a customer account to book a job.";
+
   const ensureCustomer = async (email: string, password: string, name: string) => {
     if (signedInCustomer) return;
+    if (user && !user.isGuest && user.role !== "CUSTOMER") throw new Error(wrongRoleMessage);
     try {
       await registerCustomer(email.trim(), password, name.trim());
     } catch (e: any) {
       if (e?.status === 409) {
+        let signedIn;
         try {
-          await login(email.trim(), password);
+          signedIn = await login(email.trim(), password);
         } catch {
           throw new Error("That email is already registered. Check your password, or use Log in.");
         }
+        // The credentials were valid but belong to a provider/admin — booking would 403.
+        if (signedIn && signedIn.role !== "CUSTOMER") throw new Error(wrongRoleMessage);
       } else {
         throw e;
       }
@@ -191,10 +202,13 @@ function PaymentShell({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const needAccount = !signedInCustomer;
+  // A signed-in provider/admin can't book. Don't offer them the create-account fields:
+  // filling those in led straight to the 409 → "log back in as the same admin" → 403 loop.
+  const wrongRole = !!user && !user.isGuest && user.role !== "CUSTOMER";
+  const needAccount = !signedInCustomer && !wrongRole;
   const total = estimate.basePriceCents;
   const accountReady = !needAccount || (/.+@.+\..+/.test(email) && password.length >= 6);
-  const valid = name.trim().length > 1 && cardValid && accountReady;
+  const valid = name.trim().length > 1 && cardValid && accountReady && !wrongRole;
 
   const handlePay = async () => {
     // Disable the button BEFORE the Stripe tokenization round-trip. Previously `paying` was
@@ -232,6 +246,15 @@ function PaymentShell({
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a password" className={INPUT_CLASS} />
             </label>
           </div>
+        </section>
+      ) : wrongRole ? (
+        // Signed in, but not as a customer. Say so before they fill in a card and get
+        // rejected at the final step.
+        <section className="mt-6 rounded-2xl border border-primary/40 bg-primary/5 p-4 text-sm">
+          <p className="font-semibold text-foreground">You're signed in as {user?.role === "ADMIN" ? "an admin" : "a provider"}</p>
+          <p className="mt-1 text-muted-foreground">
+            Only customer accounts can book a job. Log out and sign in with a customer account to continue.
+          </p>
         </section>
       ) : (
         <section className="mt-6 rounded-2xl border border-border bg-card p-4 text-sm text-muted-foreground">

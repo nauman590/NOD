@@ -5,6 +5,11 @@ const API = "http://localhost:3001/api";
 // Verifies the provider deposit now REQUIRES a real card (Stripe Elements),
 // instead of silently "collecting" without one. Registers a fresh provider each
 // run (idempotent) so the deposit always starts unpaid.
+
+// Drives a real Stripe SetupIntent and the Elements iframe. On the 30s default this
+// passed alone but flaked inside the full suite, where Stripe round-trips are competing
+// with every other spec — same budget as the other Stripe-driving specs.
+test.describe.configure({ timeout: 120_000 });
 test("provider deposit requires entering a card", async ({ page, request }) => {
   const email = `deptest_${Date.now()}@nod.app`;
   const reg = await request.post(`${API}/auth/register/provider`, {
